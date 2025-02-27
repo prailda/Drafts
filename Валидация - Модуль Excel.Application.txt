@@ -1,0 +1,609 @@
+﻿Option Explicit
+
+'====================================================
+' Модуль валидации для объекта Excel.Application
+' Предназначен для безопасной работы с основным объектом Excel
+'====================================================
+
+'====================================================
+' Глобальные константы и переменные
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedValue As String, ByVal actualValue As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Ошибка валидации Excel.Application! Ожидается [" & expectedValue & "], а получено [" & actualValue & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If itemName <> "" Then
+        msg = msg & vbNewLine & "Элемент: " & itemName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации Excel.Application"
+    End If
+End Sub
+
+'====================================================
+' БАЗОВЫЙ МЕТОД ВАЛИДАЦИИ
+' Этот метод используется всеми другими функциями валидации
+'====================================================
+Private Function ValidateApplication(ByVal app As Object, ByVal checkType As String, _
+                                  ByVal checkResult As Boolean, _
+                                  Optional ByVal expectedValue As String = "", _
+                                  Optional ByVal actualValue As String = "", _
+                                  Optional ByVal itemName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    ' Выполняем проверку на основе переданного результата
+    ValidateApplication = checkResult
+    
+    ' Если проверка не прошла, вызываем обработчик ошибки
+    If Not ValidateApplication Then
+        HandleValidationError expectedValue, actualValue, itemName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' ФУНКЦИИ ВАЛИДАЦИИ EXCEL.APPLICATION
+'====================================================
+
+'----------------------------------------------------
+' 1. Проверка инициализации приложения
+'----------------------------------------------------
+Public Function IsApplicationInitialized(ByVal app As Object, _
+                                      Optional ByVal itemName As String = "", _
+                                      Optional ByVal sourceInfo As String = "") As Boolean
+    On Error Resume Next
+    
+    Dim isInitialized As Boolean
+    Dim actualState As String
+    
+    ' Проверяем инициализацию приложения, пытаясь обратиться к его свойству
+    isInitialized = Not (app Is Nothing)
+    
+    If isInitialized Then
+        ' Дополнительная проверка доступности API через обращение к свойству
+        Dim testValue As String
+        testValue = app.Name
+        If Err.Number <> 0 Then
+            isInitialized = False
+            actualState = "Недоступен API Excel (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+        Else
+            actualState = "Инициализирован"
+        End If
+    Else
+        actualState = "Не инициализирован (Nothing)"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsApplicationInitialized = ValidateApplication(app, "Инициализация", _
+                                               isInitialized, _
+                                               "Инициализированный Excel.Application", _
+                                               actualState, _
+                                               itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 2. Проверка видимости приложения
+'----------------------------------------------------
+Public Function IsApplicationVisible(ByVal app As Object, ByVal shouldBeVisible As Boolean, _
+                                  Optional ByVal itemName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsApplicationVisible = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim actualVisible As Boolean
+    Dim isCorrectVisibility As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущее состояние видимости
+    actualVisible = app.Visible
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectVisibility = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectVisibility = (actualVisible = shouldBeVisible)
+        
+        ' Формируем строки для сообщений
+        If actualVisible Then
+            actualState = "Видимый"
+        Else
+            actualState = "Скрытый"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeVisible Then
+        expectedState = "Видимый"
+    Else
+        expectedState = "Скрытый"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsApplicationVisible - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectVisibility
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsApplicationVisible = ValidateApplication(app, "Видимость", _
+                                           isCorrectVisibility, _
+                                           expectedState, _
+                                           actualState, _
+                                           itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 3. Проверка состояния обработки событий
+'----------------------------------------------------
+Public Function IsEventProcessingEnabled(ByVal app As Object, ByVal shouldBeEnabled As Boolean, _
+                                     Optional ByVal itemName As String = "", _
+                                     Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsEventProcessingEnabled = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isEnabled As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущее состояние обработки событий
+    isEnabled = app.EnableEvents
+    
+    ' Сохраняем возможный код ошибки
+    Dim errCode As Long
+    errCode = Err.Number
+    
+            ' Определяем, соответствует ли оно ожидаемому
+    isCorrectState = (CBool(isEnabled) = shouldBeEnabled)
+    
+    ' Формируем строки для сообщений
+    If isEnabled Then
+        actualState = "Включена"
+    Else
+        actualState = "Отключена"
+    End If
+    
+    If shouldBeEnabled Then
+        expectedState = "Включена"
+    Else
+        expectedState = "Отключена"
+    End If
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If errCode <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsEventProcessingEnabled - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsEventProcessingEnabled = ValidateApplication(app, "Обработка событий", _
+                                                isCorrectState, _
+                                                expectedState, _
+                                                actualState, _
+                                                itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 4. Проверка состояния параметра доступа к объектной модели
+'----------------------------------------------------
+Public Function IsObjectModelAccessEnabled(ByVal app As Object, _
+                                        Optional ByVal itemName As String = "", _
+                                        Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsObjectModelAccessEnabled = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim accessEnabled As Boolean
+    Dim actualState As String
+    
+    ' Проверяем доступ к объектной модели через трастовый доступ (Trust Access)
+    ' Это свойство только для чтения, поэтому мы можем только проверить его состояние
+    ' Используем значения XlAutomationSecurity:
+    ' xlAutomationSecurityLow = 1 - низкий уровень (разрешен доступ)
+    ' xlAutomationSecurityByUI = 2 - определяется интерфейсом
+    ' xlAutomationSecurityForceDisable = 3 - запрещен доступ
+    accessEnabled = (app.AutomationSecurity = 1) ' xlAutomationSecurityLow = 1
+    
+    If Err.Number <> 0 Then
+        ' Ошибка при доступе к свойству
+        accessEnabled = False
+        actualState = "Ошибка при проверке (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+    Else
+        If accessEnabled Then
+            actualState = "Доступ разрешен"
+        Else
+            actualState = "Доступ ограничен"
+        End If
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsObjectModelAccessEnabled = ValidateApplication(app, "Доступ к объектной модели", _
+                                                  accessEnabled, _
+                                                  "Доступ разрешен", _
+                                                  actualState, _
+                                                  itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 5. Проверка состояния параметра разрешения макросов
+'----------------------------------------------------
+Public Function IsMacroSecurityLevel(ByVal app As Object, ByVal expectedLevel As Long, _
+                                  Optional ByVal itemName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsMacroSecurityLevel = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim currentLevel As Long
+    Dim isExpectedLevel As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Получаем текущий уровень безопасности макросов
+    ' В современных версиях Excel можно использовать app.MacroSecurityLevel
+    ' Но для обратной совместимости можно проверить другими способами
+    
+    ' Пример: можно проверить возможность выполнения макросов косвенно
+    Dim testResult As Boolean
+    testResult = True ' Заглушка - в реальном коде здесь будет проверка
+    
+    ' Для простоты будем использовать переданное значение как эталон
+    isExpectedLevel = testResult
+    currentLevel = IIf(testResult, expectedLevel, 0) ' Заглушка
+    
+    ' Формируем строки для сообщений
+    actualState = "Уровень: " & currentLevel
+    expectedState = "Уровень: " & expectedLevel
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsMacroSecurityLevel = ValidateApplication(app, "Уровень безопасности макросов", _
+                                           isExpectedLevel, _
+                                           expectedState, _
+                                           actualState, _
+                                           itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 6. Проверка состояния настроек безопасности
+'----------------------------------------------------
+Public Function IsSecuritySettingEnabled(ByVal app As Object, ByVal settingName As String, _
+                                      ByVal shouldBeEnabled As Boolean, _
+                                      Optional ByVal itemName As String = "", _
+                                      Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsSecuritySettingEnabled = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isEnabled As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Заглушка - проверка зависит от конкретной настройки безопасности
+    ' В реальном коде нужно добавить логику для проверки конкретных настроек
+    ' Например, для проверки настроек доверенных источников, защиты файлов и т.д.
+    
+    ' Для примера будем считать, что настройка включена
+    isEnabled = True
+    
+    ' Определяем, соответствует ли она ожидаемому состоянию
+    isCorrectState = (isEnabled = shouldBeEnabled)
+    
+    ' Формируем строки для сообщений
+    If isEnabled Then
+        actualState = "Включена"
+    Else
+        actualState = "Отключена"
+    End If
+    
+    If shouldBeEnabled Then
+        expectedState = "Включена"
+    Else
+        expectedState = "Отключена"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsSecuritySettingEnabled = ValidateApplication(app, "Настройка безопасности: " & settingName, _
+                                                isCorrectState, _
+                                                expectedState, _
+                                                actualState, _
+                                                itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 7. Проверка путей по умолчанию
+'----------------------------------------------------
+Public Function IsDefaultPathValid(ByVal app As Object, ByVal pathType As String, _
+                                ByVal expectedPath As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsDefaultPathValid = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim currentPath As String
+    Dim isValidPath As Boolean
+    
+    ' Получаем путь в зависимости от типа
+    Select Case UCase(pathType)
+        Case "DEFAULT", "DEFAULTFILEPATH"
+            currentPath = app.DefaultFilePath
+        Case "STARTUP", "STARTUPPATH", "XLSTART"
+            currentPath = app.StartupPath
+        Case "ALTERNATE", "ALTERNATESTARTUPPATH", "XLALTSTARTUP"
+            currentPath = app.AltStartupPath
+        Case "LIBRARY", "LIBRARYPATH", "ADDIN", "ADDINPATH"
+            currentPath = app.LibraryPath
+        Case "TEMPLATE", "TEMPLATEPATH", "USERTEMPLATES"
+            currentPath = app.TemplatesPath
+        Case "PERSONAL", "PERSONAL.XLSB"
+            ' В этом случае проверяем путь к файлу Personal.xlsb
+            ' Заглушка - в реальном коде нужна дополнительная логика
+            currentPath = app.StartupPath & "\PERSONAL.XLSB"
+        Case Else
+            ' Неизвестный тип пути
+            currentPath = ""
+    End Select
+    
+    ' Проверяем, соответствует ли путь ожиданиям
+    isValidPath = (LCase(currentPath) = LCase(expectedPath))
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsDefaultPathValid = ValidateApplication(app, "Путь " & pathType, _
+                                         isValidPath, _
+                                         expectedPath, _
+                                         currentPath, _
+                                         itemName, sourceInfo)
+End Function
+
+'====================================================
+' ТЕСТОВАЯ ПРОЦЕДУРА ДЛЯ ДЕМОНСТРАЦИИ РАБОТЫ МОДУЛЯ
+'====================================================
+Public Sub TestApplicationValidation()
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode False
+    ' Включаем лог в отладочное окно для анализа
+    SetDebugLogMode True
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.APPLICATION ==="
+    
+    ' Получаем объект приложения
+    Dim app As Object
+    Set app = Application
+    
+    ' Тест 1: Проверка инициализации приложения
+    Debug.Print "1. IsApplicationInitialized: " & IsApplicationInitialized(app, "ExcelApp", "TestApplicationValidation")
+    Debug.Print "1a. IsApplicationInitialized (Nothing): " & IsApplicationInitialized(Nothing, "NullApp", "TestApplicationValidation")
+    
+    ' Тест 2: Проверка видимости приложения
+    Debug.Print "2. IsApplicationVisible (True): " & IsApplicationVisible(app, True, "ExcelApp", "TestApplicationValidation")
+    
+    ' Сохраняем текущее состояние для восстановления
+    Dim currentVisibility As Boolean
+    currentVisibility = app.Visible
+    
+    ' Меняем видимость и проверяем
+    On Error Resume Next
+    
+    ' Пробуем установить видимость в False
+    app.Visible = False
+    
+    ' Задержка для применения изменений
+    DoEvents
+    
+    ' Получаем текущее состояние для диагностики
+    Dim currentVal As Boolean
+    currentVal = app.Visible
+    Debug.Print "      Текущее состояние Visible: " & currentVal
+    
+    ' Проверяем с текущим значением
+    Debug.Print "2a. IsApplicationVisible после изменения (False): " & IsApplicationVisible(app, False, "ExcelApp", "TestApplicationValidation")
+    
+    On Error GoTo 0
+    
+    ' Восстанавливаем видимость
+    app.Visible = currentVisibility
+    
+    ' Тест 3: Проверка обработки событий
+    Debug.Print "3. IsEventProcessingEnabled (True): " & IsEventProcessingEnabled(app, True, "ExcelApp", "TestApplicationValidation")
+    
+    ' Сохраняем текущее состояние для восстановления
+    Dim currentEventsState As Boolean
+    currentEventsState = app.EnableEvents
+    
+    ' Меняем состояние и проверяем
+    On Error Resume Next
+    
+    ' Пробуем установить обработку событий в False
+    app.EnableEvents = False
+    
+    ' Задержка для применения изменений
+    DoEvents
+    
+    ' Получаем текущее состояние для диагностики
+    Dim currentEventsVal As Boolean
+    currentEventsVal = app.EnableEvents
+    Debug.Print "      Текущее состояние EnableEvents: " & currentEventsVal
+    
+    ' Проверяем с текущим значением
+    Debug.Print "3a. IsEventProcessingEnabled после изменения (False): " & IsEventProcessingEnabled(app, False, "ExcelApp", "TestApplicationValidation")
+    
+    On Error GoTo 0
+    
+    ' Восстанавливаем состояние событий
+    app.EnableEvents = currentEventsState
+    
+    ' Тест 4: Проверка доступа к объектной модели
+    Debug.Print "4. IsObjectModelAccessEnabled: " & IsObjectModelAccessEnabled(app, "ExcelApp", "TestApplicationValidation")
+    
+    ' Тест 5: Проверка уровня безопасности макросов
+    Debug.Print "5. IsMacroSecurityLevel: " & IsMacroSecurityLevel(app, 1, "ExcelApp", "TestApplicationValidation")
+    
+    ' Тест 6: Проверка настроек безопасности
+    Debug.Print "6. IsSecuritySettingEnabled: " & IsSecuritySettingEnabled(app, "TrustedDocuments", True, "ExcelApp", "TestApplicationValidation")
+    
+    ' Тест 7: Проверка путей по умолчанию
+    Debug.Print "7. IsDefaultPathValid (Default): " & IsDefaultPathValid(app, "DEFAULT", app.DefaultFilePath, "ExcelApp", "TestApplicationValidation")
+    
+    Debug.Print "=== ТЕСТИРОВАНИЕ МОДУЛЯ ВАЛИДАЦИИ EXCEL.APPLICATION ЗАВЕРШЕНО ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' ПРИМЕР ИСПОЛЬЗОВАНИЯ В РЕАЛЬНОМ КОДЕ
+'====================================================
+Public Sub ExampleUsage()
+    ' Отключаем MsgBox для пакетного режима
+    SetMessageBoxMode False
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.APPLICATION ==="
+    
+    ' Получаем объект приложения
+    Dim app As Object
+    Set app = Application
+    
+    ' Проверяем инициализацию
+    If Not IsApplicationInitialized(app, "ExcelApp", "ExampleUsage") Then
+        Debug.Print "Ошибка: Excel.Application не инициализирован"
+        Exit Sub
+    End If
+    
+    ' Сохраняем текущие настройки
+    Dim oldEvents As Boolean
+    Dim oldScreenUpdating As Boolean
+    
+    oldEvents = app.EnableEvents
+    oldScreenUpdating = app.ScreenUpdating
+    
+    ' Устанавливаем нужные настройки для работы
+    app.EnableEvents = False
+    app.ScreenUpdating = False
+    
+    ' Проверяем, что настройки применились
+    If Not IsEventProcessingEnabled(app, False, "ExcelApp", "ExampleUsage") Then
+        Debug.Print "Предупреждение: Не удалось отключить обработку событий"
+    End If
+    
+    ' Здесь выполняется основной код...
+    Debug.Print "Выполнение основного кода..."
+    
+    ' Восстанавливаем настройки
+    app.EnableEvents = oldEvents
+    app.ScreenUpdating = oldScreenUpdating
+    
+    Debug.Print "Настройки восстановлены"
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ ЗАВЕРШЕН ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+

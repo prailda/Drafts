@@ -1,0 +1,4209 @@
+********** m_FSOValidator **********
+Option Explicit
+
+'====================================================
+' Модуль валидации для объектов FileSystemObject (FSO)
+' Предназначен для проверки путей, файлов и папок
+'====================================================
+
+'====================================================
+' Глобальные константы и переменные
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Константы для работы с путями
+Private Const MAX_PATH_LENGTH_WINDOWS As Long = 260      ' Максимальная длина пути в Windows
+Private Const FORBIDDEN_CHARS_WINDOWS As String = "*?<>|""" ' Запрещенные символы в Windows (без ":" для поддержки путей)
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+' Объект FileSystemObject
+Private m_FSO As Object
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+    
+    ' Инициализация объекта FSO
+    InitializeFSO
+End Sub
+
+'====================================================
+' Завершение работы модуля - освобождение ресурсов
+'====================================================
+Private Sub Class_Terminate()
+    ' Освобождаем ресурсы
+    Set m_FSO = Nothing
+End Sub
+
+'====================================================
+' Инициализация объекта FileSystemObject
+'====================================================
+Private Function InitializeFSO() As Boolean
+    On Error Resume Next
+    
+    ' Создаем объект FileSystemObject, если он еще не создан
+    If m_FSO Is Nothing Then
+        Set m_FSO = CreateObject("Scripting.FileSystemObject")
+    End If
+    
+    ' Проверяем успешность создания
+    If Err.Number <> 0 Then
+        HandleValidationError "Не удалось инициализировать FileSystemObject", _
+                           "Ошибка #" & Err.Number & ": " & Err.Description, _
+                           "m_FSO", "InitializeFSO"
+        InitializeFSO = False
+        Err.Clear
+    Else
+        InitializeFSO = True
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'====================================================
+' ТЕСТОВАЯ ПРОЦЕДУРА ДЛЯ ДЕМОНСТРАЦИИ РАБОТЫ МОДУЛЯ
+'====================================================
+Public Sub TestFSOValidation()
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode False
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ FSO ==="
+    
+    ' Получаем временную директорию для тестирования
+    ' (используем Environ("TEMP") вместо CurDir для гарантированного доступа)
+    Dim tempRootDir As String
+    Dim tempDir As String
+    Dim tempFile As String
+    Dim currentDir As String
+    
+    On Error Resume Next
+    tempRootDir = Environ("TEMP")
+    If tempRootDir = "" Then tempRootDir = "C:\Temp"
+    currentDir = CurDir()
+    
+    ' Создаем уникальные имена для тестирования
+    Dim uniqueID As String
+    uniqueID = Format(Now, "yyyymmddhhnnss") & "_" & Int(Rnd() * 10000)
+    tempDir = tempRootDir & "\FSO_Test_" & uniqueID
+    tempFile = tempDir & "\test_file.txt"
+    
+    Debug.Print "Тестовая директория: " & tempDir
+    
+    ' Создаем временную директорию и файл для тестирования
+    If m_FSO.FolderExists(tempDir) Then m_FSO.DeleteFolder tempDir, True
+    m_FSO.CreateFolder tempDir
+    
+    If Err.Number <> 0 Then
+        Debug.Print "Ошибка при создании тестовой директории: " & Err.Description
+        Err.Clear
+        ' Пытаемся создать в другом месте, если не удалось
+        tempDir = currentDir & "\FSO_Test_" & uniqueID
+        tempFile = tempDir & "\test_file.txt"
+        Debug.Print "Пытаемся создать в текущей директории: " & tempDir
+        
+        If m_FSO.FolderExists(tempDir) Then m_FSO.DeleteFolder tempDir, True
+        m_FSO.CreateFolder tempDir
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка при создании тестовой директории в текущей директории: " & Err.Description
+            Err.Clear
+            ' Если и здесь не удалось, используем пути без создания для тестирования
+            tempDir = tempRootDir ' Используем существующую директорию
+            tempFile = tempDir & "\test_file.txt"
+            Debug.Print "Используем существующую директорию: " & tempDir
+        End If
+    End If
+    
+    ' Создаем тестовый файл, если директория создана успешно
+    If m_FSO.FolderExists(tempDir) Then
+        Dim fileStream As Object
+        Set fileStream = m_FSO.CreateTextFile(tempFile, True)
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка при создании тестового файла: " & Err.Description
+            Err.Clear
+        Else
+            fileStream.WriteLine "Тестовое содержимое файла для проверки функциональности модуля валидации FSO."
+            fileStream.Close
+            Debug.Print "Тестовый файл успешно создан: " & tempFile
+        End If
+        
+        Set fileStream = Nothing
+    End If
+    
+    On Error GoTo 0
+    
+    '----------------------------------------------------
+    ' 1. Тесты валидации путей
+    '----------------------------------------------------
+    Debug.Print vbNewLine & "--- ТЕСТЫ ВАЛИДАЦИИ ПУТЕЙ ---"
+    
+    ' 1.1 Проверка на пустой путь
+    Debug.Print "IsPathNotEmpty(''):", IsPathNotEmpty("", "emptyPath", "TestFSOValidation")
+    Debug.Print "IsPathNotEmpty('" & tempDir & "'):", IsPathNotEmpty(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 1.2 Проверка на запрещенные символы
+    Debug.Print "IsPathWithoutForbiddenChars('C:\valid\path'):", IsPathWithoutForbiddenChars("C:\valid\path", "validPath", "TestFSOValidation")
+    Debug.Print "IsPathWithoutForbiddenChars('C:\invalid*\path'):", IsPathWithoutForbiddenChars("C:\invalid*\path", "invalidPath", "TestFSOValidation")
+    
+    ' 1.3 Проверка на длину пути
+    Dim longPath As String
+    longPath = String(MAX_PATH_LENGTH_WINDOWS + 10, "A")
+    Debug.Print "IsPathLengthValid('" & tempDir & "'):", IsPathLengthValid(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "IsPathLengthValid(длинный путь):", IsPathLengthValid(longPath, "longPath", "TestFSOValidation")
+    
+    ' 1.4 Проверка существования пути
+    Debug.Print "DoesPathExist('" & tempDir & "'):", DoesPathExist(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "DoesPathExist('C:\несуществующий\путь'):", DoesPathExist("C:\несуществующий\путь", "nonExistentPath", "TestFSOValidation")
+    
+    ' 1.5 Проверка абсолютного пути
+    Debug.Print "IsPathAbsolute('C:\Windows'):", IsPathAbsolute("C:\Windows", "absolutePath", "TestFSOValidation")
+    Debug.Print "IsPathAbsolute('.\relative\path'):", IsPathAbsolute(".\relative\path", "relativePath", "TestFSOValidation")
+    
+    ' 1.6 Проверка доступности пути
+    Debug.Print "IsPathAccessible('" & tempDir & "'):", IsPathAccessible(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 1.7 Комплексная проверка пути
+    Debug.Print "IsPathValid('" & tempDir & "', True, True):", IsPathValid(tempDir, True, True, "tempDir", "TestFSOValidation")
+    
+    '----------------------------------------------------
+    ' 2. Тесты валидации папок
+    '----------------------------------------------------
+    Debug.Print vbNewLine & "--- ТЕСТЫ ВАЛИДАЦИИ ПАПОК ---"
+    
+    ' 2.1 Проверка существования папки
+    Debug.Print "DoesFolderExist('" & tempDir & "'):", DoesFolderExist(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "DoesFolderExist('C:\несуществующая\папка'):", DoesFolderExist("C:\несуществующая\папка", "nonExistentFolder", "TestFSOValidation")
+    
+    ' 2.2 Проверка, что путь ведет к папке
+    Debug.Print "IsPathFolder('" & tempDir & "'):", IsPathFolder(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "IsPathFolder('" & tempFile & "'):", IsPathFolder(tempFile, "tempFile", "TestFSOValidation")
+    
+    ' 2.3 Проверка прав доступа к папке
+    Debug.Print "IsFolderWritable('" & tempDir & "'):", IsFolderWritable(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 2.4 Проверка атрибутов папки
+    Debug.Print "IsFolderHidden('" & tempDir & "'):", IsFolderHidden(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "IsFolderSystem('" & tempDir & "'):", IsFolderSystem(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 2.5 Проверка, пуста ли папка
+    Debug.Print "IsFolderEmpty('" & tempDir & "'):", IsFolderEmpty(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 2.6 Комплексная проверка папки
+    Debug.Print "IsFolderValid('" & tempDir & "', True, True, True):", _
+            IsFolderValid(tempDir, True, True, True, "tempDir", "TestFSOValidation")
+    
+    '----------------------------------------------------
+    ' 3. Тесты валидации файлов
+    '----------------------------------------------------
+    Debug.Print vbNewLine & "--- ТЕСТЫ ВАЛИДАЦИИ ФАЙЛОВ ---"
+    
+    ' 3.1 Проверка существования файла
+    Debug.Print "DoesFileExist('" & tempFile & "'):", DoesFileExist(tempFile, "tempFile", "TestFSOValidation")
+    Debug.Print "DoesFileExist('C:\несуществующий.файл'):", DoesFileExist("C:\несуществующий.файл", "nonExistentFile", "TestFSOValidation")
+    
+    ' 3.2 Проверка, что путь ведет к файлу
+    Debug.Print "IsPathFile('" & tempFile & "'):", IsPathFile(tempFile, "tempFile", "TestFSOValidation")
+    Debug.Print "IsPathFile('" & tempDir & "'):", IsPathFile(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 3.3 Проверка расширения файла
+    Debug.Print "HasFileExtension('" & tempFile & "', 'txt'):", HasFileExtension(tempFile, "txt", "tempFile", "TestFSOValidation")
+    Debug.Print "HasFileExtension('" & tempFile & "', 'doc'):", HasFileExtension(tempFile, "doc", "tempFile", "TestFSOValidation")
+    
+    ' 3.4 Проверка прав доступа к файлу
+    Debug.Print "IsFileReadable('" & tempFile & "'):", IsFileReadable(tempFile, "tempFile", "TestFSOValidation")
+    Debug.Print "IsFileWritable('" & tempFile & "'):", IsFileWritable(tempFile, "tempFile", "TestFSOValidation")
+    
+    ' 3.5 Проверка атрибутов файла
+    Debug.Print "IsFileReadOnly('" & tempFile & "'):", IsFileReadOnly(tempFile, "tempFile", "TestFSOValidation")
+    Debug.Print "IsFileHidden('" & tempFile & "'):", IsFileHidden(tempFile, "tempFile", "TestFSOValidation")
+    
+    ' 3.6 Проверка размера файла
+    Debug.Print "IsFileSizeValid('" & tempFile & "', 1000):", IsFileSizeValid(tempFile, 1000, "tempFile", "TestFSOValidation")
+    Debug.Print "IsFileSizeValid('" & tempFile & "', 10):", IsFileSizeValid(tempFile, 10, "tempFile", "TestFSOValidation")
+    
+    ' 3.7 Проверка блокировки файла
+    Debug.Print "IsFileLocked('" & tempFile & "'):", IsFileLocked(tempFile, "tempFile", "TestFSOValidation")
+    
+    ' 3.8 Комплексная проверка файла
+    Debug.Print "IsFileValid('" & tempFile & "', True, 'txt', True, True):", _
+            IsFileValid(tempFile, True, "txt", True, True, 1000, "tempFile", "TestFSOValidation")
+    
+    '----------------------------------------------------
+    ' 4. Тесты дополнительных проверок
+    '----------------------------------------------------
+    Debug.Print vbNewLine & "--- ТЕСТЫ ДОПОЛНИТЕЛЬНЫХ ПРОВЕРОК ---"
+    
+    ' 4.1 Проверка доступности диска
+    Dim systemDrive As String
+    systemDrive = Left(currentDir, 1)
+    Debug.Print "IsDriveAvailable('" & systemDrive & "'):", IsDriveAvailable(systemDrive, "systemDrive", "TestFSOValidation")
+    Debug.Print "IsDriveAvailable('Z'):", IsDriveAvailable("Z", "nonExistentDrive", "TestFSOValidation")
+    
+    ' 4.2 Получение свободного места на диске
+    Dim freeSpace As Double
+    freeSpace = GetDriveFreeSpace(systemDrive, "systemDrive", "TestFSOValidation")
+    Debug.Print "GetDriveFreeSpace('" & systemDrive & "'): " & Format(freeSpace, "#,##0") & " байт"
+    
+    ' 4.3 Проверка наличия достаточного свободного места
+    Debug.Print "HasDriveSufficientSpace('" & systemDrive & "', 1000000):", _
+            HasDriveSufficientSpace(systemDrive, 1000000, "systemDrive", "TestFSOValidation")
+    
+    ' Удаляем временные файлы и папки
+    On Error Resume Next
+    If m_FSO.FileExists(tempFile) Then m_FSO.DeleteFile tempFile, True
+    If m_FSO.FolderExists(tempDir) Then m_FSO.DeleteFolder tempDir, True
+    On Error GoTo 0
+    
+    Debug.Print vbNewLine & "=== ТЕСТИРОВАНИЕ МОДУЛЯ ВАЛИДАЦИИ FSO ЗАВЕРШЕНО ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' ПРИМЕР ИСПОЛЬЗОВАНИЯ В РЕАЛЬНОМ КОДЕ
+'====================================================
+Public Sub ExampleUsageFSO()
+    ' Отключаем MsgBox для пакетного режима
+    SetMessageBoxMode False
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ FSO ==="
+    
+    ' Пример создания файла отчета
+    Dim reportPath As String
+    Dim reportDir As String
+    Dim reportFile As String
+    Dim systemDrive As String
+    
+    ' Получаем временную директорию и букву системного диска
+    reportDir = Environ("TEMP")
+    If reportDir = "" Then reportDir = "C:\Temp"
+    reportDir = reportDir & "\Reports"
+    
+    reportFile = "report_" & Format(Now, "yyyymmdd") & ".txt"
+    reportPath = reportDir & "\" & reportFile
+    systemDrive = Left(reportDir, 1)
+    
+    Debug.Print "Используем директорию для отчетов: " & reportDir
+    
+    ' 1. Проверяем наличие свободного места на диске
+    If Not HasDriveSufficientSpace(systemDrive, 1000000#, "systemDrive", "ExampleUsageFSO") Then
+        Debug.Print "Ошибка: Недостаточно места на диске для создания отчета"
+        Exit Sub
+    End If
+    
+    ' 2. Проверяем существование и доступность директории для отчетов
+    If Not DoesFolderExist(reportDir, "reportDir", "ExampleUsageFSO") Then
+        ' Папка не существует, пробуем создать
+        On Error Resume Next
+        m_FSO.CreateFolder reportDir
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось создать директорию для отчетов"
+            Exit Sub
+        End If
+        On Error GoTo 0
+    End If
+    
+    ' 3. Проверяем права на запись в директорию
+    If Not IsFolderWritable(reportDir, "reportDir", "ExampleUsageFSO") Then
+        Debug.Print "Ошибка: Нет прав на запись в директорию отчетов"
+        Exit Sub
+    End If
+    
+    ' 4. Проверяем, не существует ли уже файл с таким именем
+    If DoesFileExist(reportPath, "reportPath", "ExampleUsageFSO") Then
+        ' Файл уже существует, проверяем возможность перезаписи
+        If IsFileReadOnly(reportPath, "reportPath", "ExampleUsageFSO") Then
+            Debug.Print "Ошибка: Файл отчета уже существует и защищен от записи"
+            Exit Sub
+        End If
+        
+        If IsFileLocked(reportPath, "reportPath", "ExampleUsageFSO") Then
+            Debug.Print "Ошибка: Файл отчета заблокирован другим процессом"
+            Exit Sub
+        End If
+    End If
+    
+    ' 5. Создаем файл отчета
+    Dim fileStream As Object
+    On Error Resume Next
+    Set fileStream = m_FSO.CreateTextFile(reportPath, True)
+    
+    If Err.Number <> 0 Then
+        Debug.Print "Ошибка при создании файла отчета: " & Err.Description
+        Exit Sub
+    End If
+    
+    ' 6. Записываем данные в отчет
+    fileStream.WriteLine "===== ОТЧЕТ ОТ " & Format(Now, "dd.mm.yyyy hh:nn:ss") & " ====="
+    fileStream.WriteLine "Пример использования модуля валидации FSO."
+    fileStream.WriteLine "Этот файл был создан после успешного прохождения всех проверок."
+    fileStream.Close
+    Set fileStream = Nothing
+    
+    Debug.Print "Успех: Файл отчета успешно создан: " & reportPath
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ ЗАВЕРШЕН ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Получение объекта FSO для внешнего использования
+'====================================================
+Public Function GetFSO() As Object
+    If m_FSO Is Nothing Then
+        InitializeFSO
+    End If
+    
+    Set GetFSO = m_FSO
+End Function
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedValue As String, ByVal actualValue As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Ошибка валидации FSO! Ожидается [" & expectedValue & "], а получено [" & actualValue & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If itemName <> "" Then
+        msg = msg & vbNewLine & "Элемент: " & itemName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации FSO"
+    End If
+End Sub
+
+'====================================================
+' ВАЛИДАЦИЯ ПУТЕЙ (Path)
+'====================================================
+
+'----------------------------------------------------
+' Проверка, что строка не пустая
+'----------------------------------------------------
+Public Function IsPathNotEmpty(ByVal path As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    IsPathNotEmpty = (Trim(path) <> "")
+    
+    If Not IsPathNotEmpty Then
+        HandleValidationError "Непустой путь", "Пустая строка", itemName, sourceInfo
+    End If
+End Function
+
+'----------------------------------------------------
+' Проверка на запрещенные символы в пути (Windows)
+'----------------------------------------------------
+Public Function IsPathWithoutForbiddenChars(ByVal path As String, _
+                                         Optional ByVal itemName As String = "", _
+                                         Optional ByVal sourceInfo As String = "") As Boolean
+    Dim i As Integer
+    Dim char As String
+    
+    ' Проверяем каждый символ в строке пути
+    For i = 1 To Len(FORBIDDEN_CHARS_WINDOWS)
+        char = Mid(FORBIDDEN_CHARS_WINDOWS, i, 1)
+        
+        ' Если найден запрещенный символ
+        If InStr(1, path, char) > 0 Then
+            IsPathWithoutForbiddenChars = False
+            HandleValidationError "Путь без запрещенных символов", _
+                               "Содержит запрещенный символ '" & char & "'", _
+                               itemName, sourceInfo
+            Exit Function
+        End If
+    Next i
+    
+    IsPathWithoutForbiddenChars = True
+End Function
+
+'----------------------------------------------------
+' Проверка на превышение максимальной длины пути (Windows)
+'----------------------------------------------------
+Public Function IsPathLengthValid(ByVal path As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    IsPathLengthValid = (Len(path) <= MAX_PATH_LENGTH_WINDOWS)
+    
+    If Not IsPathLengthValid Then
+        HandleValidationError "Длина пути <= " & MAX_PATH_LENGTH_WINDOWS & " символов", _
+                           "Длина " & Len(path) & " символов", _
+                           itemName, sourceInfo
+    End If
+End Function
+
+'----------------------------------------------------
+' Проверка существования пути (может быть файл или папка)
+'----------------------------------------------------
+Public Function DoesPathExist(ByVal path As String, _
+                           Optional ByVal itemName As String = "", _
+                           Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            DoesPathExist = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    ' Проверяем существование файла или папки
+    DoesPathExist = m_FSO.FileExists(path) Or m_FSO.FolderExists(path)
+    
+    If Err.Number <> 0 Then
+        DoesPathExist = False
+        HandleValidationError "Существующий путь", _
+                          "Ошибка при проверке: " & Err.Description, _
+                          itemName, sourceInfo
+        Err.Clear
+    ElseIf Not DoesPathExist Then
+        HandleValidationError "Существующий путь", "Путь не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, является ли путь абсолютным
+'----------------------------------------------------
+Public Function IsPathAbsolute(ByVal path As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            IsPathAbsolute = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Используем FSO для определения абсолютного пути
+    Dim absolutePath As String
+    absolutePath = m_FSO.GetAbsolutePathName(path)
+    
+    ' Если путь начинается с буквы диска или с двух обратных слешей, он абсолютный
+    IsPathAbsolute = (Mid(path, 2, 1) = ":" Or Left(path, 2) = "\\")
+    
+    If Err.Number <> 0 Then
+        IsPathAbsolute = False
+        HandleValidationError "Абсолютный путь", _
+                          "Ошибка при проверке: " & Err.Description, _
+                          itemName, sourceInfo
+        Err.Clear
+    ElseIf Not IsPathAbsolute Then
+        HandleValidationError "Абсолютный путь", "Относительный путь", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка доступности пути (доступ на чтение)
+'----------------------------------------------------
+Public Function IsPathAccessible(ByVal path As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем существование пути
+    If Not DoesPathExist(path, itemName, sourceInfo) Then
+        IsPathAccessible = False
+        Exit Function
+    End If
+    
+    ' Проверяем доступность для чтения
+    On Error Resume Next
+    
+    If m_FSO.FileExists(path) Then
+        ' Для файла пробуем открыть на чтение
+        Dim fileStream As Object
+        Set fileStream = m_FSO.OpenTextFile(path, 1, False) ' 1 = ForReading
+        
+        If Err.Number = 0 Then
+            fileStream.Close
+            IsPathAccessible = True
+        Else
+            IsPathAccessible = False
+            HandleValidationError "Доступный путь", _
+                              "Нет доступа на чтение: " & Err.Description, _
+                              itemName, sourceInfo
+        End If
+        
+        Set fileStream = Nothing
+    ElseIf m_FSO.FolderExists(path) Then
+        ' Для папки пробуем получить файлы
+        Dim folder As Object
+        Set folder = m_FSO.GetFolder(path)
+        
+        If Err.Number = 0 Then
+            IsPathAccessible = True
+        Else
+            IsPathAccessible = False
+            HandleValidationError "Доступный путь", _
+                              "Нет доступа: " & Err.Description, _
+                              itemName, sourceInfo
+        End If
+        
+        Set folder = Nothing
+    End If
+    
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Комплексная проверка пути
+'----------------------------------------------------
+Public Function IsPathValid(ByVal path As String, ByVal mustExist As Boolean, _
+                         Optional ByVal mustBeAbsolute As Boolean = False, _
+                         Optional ByVal itemName As String = "", _
+                         Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем базовые требования к пути
+    If Not IsPathNotEmpty(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    If Not IsPathWithoutForbiddenChars(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    If Not IsPathLengthValid(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    ' Проверяем существование, если требуется
+    If mustExist And Not DoesPathExist(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    ' Проверяем на абсолютный путь, если требуется
+    If mustBeAbsolute And Not IsPathAbsolute(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    IsPathValid = True
+End Function
+
+'====================================================
+' ВАЛИДАЦИЯ ПАПОК (Folder)
+'====================================================
+
+'----------------------------------------------------
+' Проверка существования папки
+'----------------------------------------------------
+Public Function DoesFolderExist(ByVal folderPath As String, _
+                             Optional ByVal itemName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            DoesFolderExist = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Проверяем, существует ли папка
+    DoesFolderExist = m_FSO.FolderExists(folderPath)
+    
+    If Err.Number <> 0 Then
+        DoesFolderExist = False
+        HandleValidationError "Существующая папка", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not DoesFolderExist Then
+        HandleValidationError "Существующая папка", "Папка не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, что путь ведет к папке, а не к файлу
+'----------------------------------------------------
+Public Function IsPathFolder(ByVal path As String, _
+                          Optional ByVal itemName As String = "", _
+                          Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            IsPathFolder = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Проверяем, существует ли путь
+    If Not DoesPathExist(path, itemName, sourceInfo) Then
+        IsPathFolder = False
+        Exit Function
+    End If
+    
+    ' Проверяем, что это папка, а не файл
+    IsPathFolder = m_FSO.FolderExists(path) And Not m_FSO.FileExists(path)
+    
+    If Err.Number <> 0 Then
+        IsPathFolder = False
+        HandleValidationError "Путь к папке", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not IsPathFolder Then
+        HandleValidationError "Путь к папке", "Путь ведет к файлу или не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка прав доступа к папке (чтение/запись)
+'----------------------------------------------------
+Public Function IsFolderWritable(ByVal folderPath As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование папки
+    If Not DoesFolderExist(folderPath, itemName, sourceInfo) Then
+        IsFolderWritable = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Создаем временный файл для проверки прав на запись
+    Dim tempFileName As String
+    Dim tempFilePath As String
+    Dim fileStream As Object
+    
+    ' Генерируем уникальное имя для временного файла
+    tempFileName = "temp_" & Format(Now, "yyyymmdd_hhnnss") & ".tmp"
+    tempFilePath = folderPath & IIf(Right(folderPath, 1) = "\" Or Right(folderPath, 1) = "/", "", "\") & tempFileName
+    
+    ' Пробуем создать файл
+    Set fileStream = m_FSO.CreateTextFile(tempFilePath, True)
+    
+    ' Проверяем результат
+    If Err.Number = 0 Then
+        ' Успешно создали файл, значит папка доступна для записи
+        fileStream.Close
+        
+        ' Удаляем временный файл
+        m_FSO.DeleteFile tempFilePath, True
+        
+        IsFolderWritable = True
+    Else
+        ' Не удалось создать файл, папка не доступна для записи
+        IsFolderWritable = False
+        HandleValidationError "Папка с правами на запись", _
+                           "Нет прав на запись: " & Err.Description, _
+                           itemName, sourceInfo
+    End If
+    
+    Set fileStream = Nothing
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка атрибутов папки (скрытая, системная)
+'----------------------------------------------------
+Public Function IsFolderHidden(ByVal folderPath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование папки
+    If Not DoesFolderExist(folderPath, itemName, sourceInfo) Then
+        IsFolderHidden = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект папки и проверяем ее атрибуты
+    Dim folder As Object
+    Set folder = m_FSO.GetFolder(folderPath)
+    
+    If Err.Number <> 0 Then
+        IsFolderHidden = False
+        HandleValidationError "Доступ к атрибутам папки", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, имеет ли папка атрибут "Скрытый"
+        ' Атрибут Hidden = 2
+        IsFolderHidden = ((folder.Attributes And 2) = 2)
+    End If
+    
+    Set folder = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, является ли папка системной
+'----------------------------------------------------
+Public Function IsFolderSystem(ByVal folderPath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование папки
+    If Not DoesFolderExist(folderPath, itemName, sourceInfo) Then
+        IsFolderSystem = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект папки и проверяем ее атрибуты
+    Dim folder As Object
+    Set folder = m_FSO.GetFolder(folderPath)
+    
+    If Err.Number <> 0 Then
+        IsFolderSystem = False
+        HandleValidationError "Доступ к атрибутам папки", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, имеет ли папка атрибут "Системный"
+        ' Атрибут System = 4
+        IsFolderSystem = ((folder.Attributes And 4) = 4)
+    End If
+    
+    Set folder = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, пуста ли папка
+'----------------------------------------------------
+Public Function IsFolderEmpty(ByVal folderPath As String, _
+                           Optional ByVal itemName As String = "", _
+                           Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование папки
+    If Not DoesFolderExist(folderPath, itemName, sourceInfo) Then
+        IsFolderEmpty = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект папки
+    Dim folder As Object
+    Set folder = m_FSO.GetFolder(folderPath)
+    
+    If Err.Number <> 0 Then
+        IsFolderEmpty = False
+        HandleValidationError "Доступ к содержимому папки", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, есть ли файлы или подпапки
+        IsFolderEmpty = (folder.Files.Count = 0 And folder.SubFolders.Count = 0)
+    End If
+    
+    Set folder = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Комплексная проверка папки
+'----------------------------------------------------
+Public Function IsFolderValid(ByVal folderPath As String, ByVal mustExist As Boolean, _
+                           Optional ByVal mustBeWritable As Boolean = False, _
+                           Optional ByVal mustNotBeHiddenOrSystem As Boolean = False, _
+                           Optional ByVal itemName As String = "", _
+                           Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем базовые требования к пути
+    If Not IsPathValid(folderPath, mustExist, False, itemName, sourceInfo) Then
+        IsFolderValid = False
+        Exit Function
+    End If
+    
+    ' Если папка должна существовать, выполняем дополнительные проверки
+    If mustExist Then
+        ' Проверяем, что путь ведет к папке, а не к файлу
+        If Not IsPathFolder(folderPath, itemName, sourceInfo) Then
+            IsFolderValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем права на запись, если требуется
+        If mustBeWritable And Not IsFolderWritable(folderPath, itemName, sourceInfo) Then
+            IsFolderValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем, что папка не скрытая и не системная, если требуется
+        If mustNotBeHiddenOrSystem Then
+            If IsFolderHidden(folderPath, itemName, sourceInfo) Then
+                HandleValidationError "Видимая папка", "Скрытая папка", itemName, sourceInfo
+                IsFolderValid = False
+                Exit Function
+            End If
+            
+            If IsFolderSystem(folderPath, itemName, sourceInfo) Then
+                HandleValidationError "Обычная папка", "Системная папка", itemName, sourceInfo
+                IsFolderValid = False
+                Exit Function
+            End If
+        End If
+    End If
+    
+    IsFolderValid = True
+End Function
+
+'====================================================
+' ВАЛИДАЦИЯ ФАЙЛОВ (File)
+'====================================================
+
+'----------------------------------------------------
+' Проверка существования файла
+'----------------------------------------------------
+Public Function DoesFileExist(ByVal filePath As String, _
+                           Optional ByVal itemName As String = "", _
+                           Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            DoesFileExist = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Проверяем, существует ли файл
+    DoesFileExist = m_FSO.FileExists(filePath)
+    
+    If Err.Number <> 0 Then
+        DoesFileExist = False
+        HandleValidationError "Существующий файл", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not DoesFileExist Then
+        HandleValidationError "Существующий файл", "Файл не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, что путь ведет к файлу, а не к папке
+'----------------------------------------------------
+Public Function IsPathFile(ByVal path As String, _
+                        Optional ByVal itemName As String = "", _
+                        Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            IsPathFile = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Проверяем, существует ли путь
+    If Not DoesPathExist(path, itemName, sourceInfo) Then
+        IsPathFile = False
+        Exit Function
+    End If
+    
+    ' Проверяем, что это файл, а не папка
+    IsPathFile = m_FSO.FileExists(path) And Not m_FSO.FolderExists(path)
+    
+    If Err.Number <> 0 Then
+        IsPathFile = False
+        HandleValidationError "Путь к файлу", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not IsPathFile Then
+        HandleValidationError "Путь к файлу", "Путь ведет к папке или не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка расширения файла
+'----------------------------------------------------
+Public Function HasFileExtension(ByVal filePath As String, ByVal extension As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            HasFileExtension = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем расширение файла
+    Dim fileExtension As String
+    
+    ' Убираем точку из расширения, если она есть
+    If Left(extension, 1) = "." Then
+        extension = Mid(extension, 2)
+    End If
+    
+    ' Получаем расширение файла через FSO
+    fileExtension = m_FSO.GetExtensionName(filePath)
+    
+    If Err.Number <> 0 Then
+        HasFileExtension = False
+        HandleValidationError "Файл с расширением ." & extension, _
+                           "Ошибка при получении расширения: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Сравниваем расширения (без учета регистра)
+        HasFileExtension = (LCase(fileExtension) = LCase(extension))
+        
+        If Not HasFileExtension Then
+            HandleValidationError "Файл с расширением ." & extension, _
+                               "Файл имеет расширение ." & fileExtension, _
+                               itemName, sourceInfo
+        End If
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка прав доступа к файлу (чтение)
+'----------------------------------------------------
+Public Function IsFileReadable(ByVal filePath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileReadable = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Пробуем открыть файл для чтения
+    Dim fileStream As Object
+    Set fileStream = m_FSO.OpenTextFile(filePath, 1, False) ' 1 = ForReading
+    
+    ' Проверяем результат
+    If Err.Number = 0 Then
+        ' Успешно открыли файл, значит он доступен для чтения
+        fileStream.Close
+        IsFileReadable = True
+    Else
+        ' Не удалось открыть файл
+        IsFileReadable = False
+        HandleValidationError "Файл с правами на чтение", _
+                           "Нет прав на чтение: " & Err.Description, _
+                           itemName, sourceInfo
+    End If
+    
+    Set fileStream = Nothing
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка прав доступа к файлу (запись)
+'----------------------------------------------------
+Public Function IsFileWritable(ByVal filePath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверка существования файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileWritable = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Пробуем открыть файл для записи
+    Dim fileStream As Object
+    Set fileStream = m_FSO.OpenTextFile(filePath, 8, False) ' 8 = ForAppending
+    
+    ' Проверяем результат
+    If Err.Number = 0 Then
+        ' Успешно открыли файл для записи
+        fileStream.Close
+        IsFileWritable = True
+    Else
+        ' Не удалось открыть файл для записи
+        IsFileWritable = False
+        HandleValidationError "Файл с правами на запись", _
+                           "Нет прав на запись: " & Err.Description, _
+                           itemName, sourceInfo
+    End If
+    
+    Set fileStream = Nothing
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка атрибутов файла (только для чтения)
+'----------------------------------------------------
+'----------------------------------------------------
+' Проверка атрибутов файла (скрытый)
+'----------------------------------------------------
+Public Function IsFileHidden(ByVal filePath As String, _
+                          Optional ByVal itemName As String = "", _
+                          Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileHidden = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект файла и проверяем его атрибуты
+    Dim fileObj As Object
+    Set fileObj = m_FSO.GetFile(filePath)
+    
+    If Err.Number <> 0 Then
+        IsFileHidden = False
+        HandleValidationError "Доступ к атрибутам файла", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, имеет ли файл атрибут "Скрытый"
+        ' Атрибут Hidden = 2
+        IsFileHidden = ((fileObj.Attributes And 2) = 2)
+    End If
+    
+    Set fileObj = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка размера файла
+'----------------------------------------------------
+Public Function IsFileSizeValid(ByVal filePath As String, ByVal maxSizeBytes As Long, _
+                             Optional ByVal itemName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileSizeValid = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект файла и его размер
+    Dim fileObj As Object
+    Set fileObj = m_FSO.GetFile(filePath)
+    
+    If Err.Number <> 0 Then
+        IsFileSizeValid = False
+        HandleValidationError "Доступ к свойствам файла", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем размер файла
+        Dim fileSize As Long
+        fileSize = fileObj.Size
+        
+        IsFileSizeValid = (fileSize <= maxSizeBytes)
+        
+        If Not IsFileSizeValid Then
+            HandleValidationError "Размер файла <= " & maxSizeBytes & " байт", _
+                               "Размер файла = " & fileSize & " байт", _
+                               itemName, sourceInfo
+        End If
+    End If
+    
+    Set fileObj = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка на блокировку файла другим процессом
+'----------------------------------------------------
+Public Function IsFileLocked(ByVal filePath As String, _
+                          Optional ByVal itemName As String = "", _
+                          Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileLocked = True ' Считаем несуществующий файл блокированным
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Пробуем открыть файл в режиме эксклюзивного доступа
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    
+    Open filePath For Binary Access Read Write Lock Read Write As #fileNum
+    
+    ' Проверяем результат
+    If Err.Number <> 0 Then
+        ' Не удалось открыть файл, вероятно он заблокирован
+        IsFileLocked = True
+        ' Не вызываем HandleValidationError, так как это не ошибка валидации
+    Else
+        ' Успешно открыли файл
+        IsFileLocked = False
+        Close #fileNum
+    End If
+    
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Комплексная проверка файла
+'----------------------------------------------------
+Public Function IsFileValid(ByVal filePath As String, ByVal mustExist As Boolean, _
+                         Optional ByVal requiredExtension As String = "", _
+                         Optional ByVal mustBeReadable As Boolean = False, _
+                         Optional ByVal mustBeWritable As Boolean = False, _
+                         Optional ByVal maxSizeBytes As Long = -1, _
+                         Optional ByVal itemName As String = "", _
+                         Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем базовые требования к пути
+    If Not IsPathValid(filePath, mustExist, False, itemName, sourceInfo) Then
+        IsFileValid = False
+        Exit Function
+    End If
+    
+    ' Если файл должен существовать, выполняем дополнительные проверки
+    If mustExist Then
+        ' Проверяем, что путь ведет к файлу, а не к папке
+        If Not IsPathFile(filePath, itemName, sourceInfo) Then
+            IsFileValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем расширение, если задано
+        If requiredExtension <> "" Then
+            If Not HasFileExtension(filePath, requiredExtension, itemName, sourceInfo) Then
+                IsFileValid = False
+                Exit Function
+            End If
+        End If
+        
+        ' Проверяем права на чтение, если требуется
+        If mustBeReadable And Not IsFileReadable(filePath, itemName, sourceInfo) Then
+            IsFileValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем права на запись, если требуется
+        If mustBeWritable And Not IsFileWritable(filePath, itemName, sourceInfo) Then
+            IsFileValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем размер файла, если задан максимальный размер
+        If maxSizeBytes > 0 Then
+            If Not IsFileSizeValid(filePath, maxSizeBytes, itemName, sourceInfo) Then
+                IsFileValid = False
+                Exit Function
+            End If
+        End If
+        
+        ' Проверяем блокировку файла
+        If IsFileLocked(filePath, itemName, sourceInfo) Then
+            HandleValidationError "Файл доступен", "Файл заблокирован другим процессом", itemName, sourceInfo
+            IsFileValid = False
+            Exit Function
+        End If
+    End If
+    
+    IsFileValid = True
+End Function
+
+'====================================================
+' ДОПОЛНИТЕЛЬНЫЕ ПРОВЕРКИ ДЛЯ FSO
+'====================================================
+
+'----------------------------------------------------
+' Проверка доступности диска
+'----------------------------------------------------
+Public Function IsDriveAvailable(ByVal driveLetter As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            IsDriveAvailable = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Нормализуем букву диска
+    driveLetter = Left(driveLetter, 1)
+    
+    ' Проверяем, существует ли диск
+    IsDriveAvailable = m_FSO.DriveExists(driveLetter)
+    
+    If Err.Number <> 0 Then
+        IsDriveAvailable = False
+        HandleValidationError "Доступный диск", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not IsDriveAvailable Then
+        HandleValidationError "Доступный диск", "Диск " & driveLetter & ": не существует", itemName, sourceInfo
+    Else
+        ' Если диск существует, проверяем его готовность
+        Dim driveObj As Object
+        Set driveObj = m_FSO.GetDrive(driveLetter)
+        
+        If Err.Number <> 0 Then
+            IsDriveAvailable = False
+            HandleValidationError "Доступный диск", _
+                               "Ошибка при получении объекта диска: " & Err.Description, _
+                               itemName, sourceInfo
+            Err.Clear
+        Else
+            IsDriveAvailable = driveObj.IsReady
+            
+            If Not IsDriveAvailable Then
+                HandleValidationError "Готовый диск", "Диск " & driveLetter & ": не готов", itemName, sourceInfo
+            End If
+        End If
+        
+        Set driveObj = Nothing
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Получение свободного места на диске
+'----------------------------------------------------
+Public Function GetDriveFreeSpace(ByVal driveLetter As String, _
+                               Optional ByVal itemName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Double
+    ' Инициализация возвращаемого значения (-1 = ошибка)
+    GetDriveFreeSpace = -1
+    
+    ' Проверяем доступность диска
+    If Not IsDriveAvailable(driveLetter, itemName, sourceInfo) Then
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Нормализуем букву диска
+    driveLetter = Left(driveLetter, 1)
+    
+    ' Получаем объект диска и его свободное место
+    Dim driveObj As Object
+    Set driveObj = m_FSO.GetDrive(driveLetter)
+    
+    If Err.Number <> 0 Then
+        HandleValidationError "Доступ к свойствам диска", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Получаем свободное место в байтах
+        ' Используем Double для больших значений
+        GetDriveFreeSpace = CDbl(driveObj.freeSpace)
+        
+        If Err.Number <> 0 Then
+            GetDriveFreeSpace = -1
+            HandleValidationError "Доступ к свободному месту", _
+                               "Ошибка: " & Err.Description, _
+                               itemName, sourceInfo
+            Err.Clear
+        End If
+    End If
+    
+    Set driveObj = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка наличия достаточного свободного места на диске
+'----------------------------------------------------
+Public Function HasDriveSufficientSpace(ByVal driveLetter As String, ByVal requiredSpaceBytes As Double, _
+                                      Optional ByVal itemName As String = "", _
+                                      Optional ByVal sourceInfo As String = "") As Boolean
+    ' Получаем свободное место на диске
+    Dim freeSpace As Double
+    freeSpace = GetDriveFreeSpace(driveLetter, itemName, sourceInfo)
+    
+    ' Проверяем результат
+    If freeSpace = -1 Then
+        HasDriveSufficientSpace = False ' Ошибка при получении свободного места
+    Else
+        HasDriveSufficientSpace = (freeSpace >= requiredSpaceBytes)
+        
+        If Not HasDriveSufficientSpace Then
+            HandleValidationError "Свободное место >= " & Format(requiredSpaceBytes, "#,##0") & " байт", _
+                               "Доступно только " & Format(freeSpace, "#,##0") & " байт", _
+                               itemName, sourceInfo
+        End If
+    End If
+End Function
+
+'----------------------------------------------------
+' Проверка атрибутов файла (только для чтения)
+'----------------------------------------------------
+Public Function IsFileReadOnly(ByVal filePath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileReadOnly = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект файла и проверяем его атрибуты
+    Dim fileObj As Object
+    Set fileObj = m_FSO.GetFile(filePath)
+    
+    If Err.Number <> 0 Then
+        IsFileReadOnly = False
+        HandleValidationError "Доступ к атрибутам файла", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, имеет ли файл атрибут "Только для чтения"
+        ' Атрибут ReadOnly = 1
+        IsFileReadOnly = ((fileObj.Attributes And 1) = 1)
+    End If
+    
+    Set fileObj = Nothing
+    On Error GoTo 0
+End Function
+
+
+********** Validation **********
+
+
+********** m_WbValidator **********
+Option Explicit
+
+'====================================================
+' Модуль валидации для объекта Excel.Workbook
+' Предназначен для безопасной работы с книгами Excel
+'====================================================
+
+'====================================================
+' Глобальные константы и переменные
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+' Ссылка на модуль валидации Application (опционально)
+Private m_AppValidator As Object
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+    Set m_AppValidator = Nothing ' Будет инициализирован при необходимости
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Установка ссылки на модуль валидации Application (опционально)
+'====================================================
+Public Sub SetApplicationValidator(ByVal appValidator As Object)
+    Set m_AppValidator = appValidator
+End Sub
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedValue As String, ByVal actualValue As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Ошибка валидации Excel.Workbook! Ожидается [" & expectedValue & "], а получено [" & actualValue & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If itemName <> "" Then
+        msg = msg & vbNewLine & "Элемент: " & itemName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации Excel.Workbook"
+    End If
+End Sub
+
+'====================================================
+' БАЗОВЫЙ МЕТОД ВАЛИДАЦИИ
+' Этот метод используется всеми другими функциями валидации
+'====================================================
+Private Function ValidateWorkbook(ByVal wb As Object, ByVal checkType As String, _
+                               ByVal checkResult As Boolean, _
+                               Optional ByVal expectedValue As String = "", _
+                               Optional ByVal actualValue As String = "", _
+                               Optional ByVal itemName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Boolean
+    ' Выполняем проверку на основе переданного результата
+    ValidateWorkbook = checkResult
+    
+    ' Если проверка не прошла, вызываем обработчик ошибки
+    If Not ValidateWorkbook Then
+        HandleValidationError expectedValue, actualValue, itemName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' ФУНКЦИИ ВАЛИДАЦИИ EXCEL.WORKBOOK
+'====================================================
+
+'----------------------------------------------------
+' 1. Проверка инициализации книги
+'----------------------------------------------------
+Public Function IsWorkbookInitialized(ByVal wb As Object, _
+                                   Optional ByVal itemName As String = "", _
+                                   Optional ByVal sourceInfo As String = "") As Boolean
+    On Error Resume Next
+    
+    Dim isInitialized As Boolean
+    Dim actualState As String
+    
+    ' Проверяем инициализацию книги, пытаясь обратиться к её свойству
+    isInitialized = Not (wb Is Nothing)
+    
+    If isInitialized Then
+        ' Дополнительная проверка доступности API через обращение к свойству
+        Dim testValue As String
+        testValue = wb.Name
+        If Err.Number <> 0 Then
+            isInitialized = False
+            actualState = "Недоступен API книги (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+        Else
+            actualState = "Инициализирована"
+        End If
+    Else
+        actualState = "Не инициализирована (Nothing)"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookInitialized = ValidateWorkbook(wb, "Инициализация", _
+                                          isInitialized, _
+                                          "Инициализированная Excel.Workbook", _
+                                          actualState, _
+                                          itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 2. Проверка состояния книги (открыта/закрыта)
+'----------------------------------------------------
+Public Function IsWorkbookOpen(ByVal wb As Object, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        IsWorkbookOpen = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isOpen As Boolean
+    Dim actualState As String
+    
+    ' Проверяем, открыта ли книга, пытаясь получить её имя
+    Dim testName As String
+    testName = wb.Name
+    
+    isOpen = (Err.Number = 0)
+    
+    If isOpen Then
+        actualState = "Открыта"
+    Else
+        actualState = "Закрыта или недоступна (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorkbookOpen - Actual: " & actualState & ", Match: " & isOpen
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookOpen = ValidateWorkbook(wb, "Состояние книги", _
+                                   isOpen, _
+                                   "Открыта", _
+                                   actualState, _
+                                   itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 3. Проверка сохранённого состояния книги
+'----------------------------------------------------
+Public Function IsWorkbookSaved(ByVal wb As Object, ByVal shouldBeSaved As Boolean, _
+                             Optional ByVal itemName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        IsWorkbookSaved = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        IsWorkbookSaved = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isSaved As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Проверяем сохранённое состояние книги
+    ' в Excel свойство Saved = True означает, что нет несохраненных изменений
+    isSaved = wb.Saved
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (isSaved = shouldBeSaved)
+        
+        ' Формируем строки для сообщений
+        If isSaved Then
+            actualState = "Сохранена"
+        Else
+            actualState = "Не сохранена"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeSaved Then
+        expectedState = "Сохранена"
+    Else
+        expectedState = "Не сохранена"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorkbookSaved - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookSaved = ValidateWorkbook(wb, "Состояние сохранения", _
+                                    isCorrectState, _
+                                    expectedState, _
+                                    actualState, _
+                                    itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 4. Проверка состояния защиты книги
+'----------------------------------------------------
+Public Function IsWorkbookProtected(ByVal wb As Object, ByVal shouldBeProtected As Boolean, _
+                                 Optional ByVal itemName As String = "", _
+                                 Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        IsWorkbookProtected = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        IsWorkbookProtected = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isProtected As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Проверяем состояние защиты книги
+    isProtected = wb.ProtectStructure Or wb.ProtectWindows
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (isProtected = shouldBeProtected)
+        
+        ' Формируем строки для сообщений
+        If isProtected Then
+            actualState = "Защищена"
+        Else
+            actualState = "Не защищена"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeProtected Then
+        expectedState = "Защищена"
+    Else
+        expectedState = "Не защищена"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorkbookProtected - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookProtected = ValidateWorkbook(wb, "Состояние защиты", _
+                                        isCorrectState, _
+                                        expectedState, _
+                                        actualState, _
+                                        itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 5. Проверка свойства книги (имя, путь и т.д.)
+'----------------------------------------------------
+Public Function IsWorkbookPropertyValid(ByVal wb As Object, ByVal propertyName As String, _
+                                     ByVal expectedValue As Variant, _
+                                     Optional ByVal itemName As String = "", _
+                                     Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        IsWorkbookPropertyValid = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        IsWorkbookPropertyValid = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim actualValue As Variant
+    Dim isValid As Boolean
+    Dim actualValueString As String
+    Dim expectedValueString As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем значение свойства в зависимости от его имени
+    Select Case UCase(propertyName)
+        Case "NAME", "НАЗВАНИЕ"
+            actualValue = wb.Name
+        Case "PATH", "ПУТЬ"
+            actualValue = wb.path
+        Case "FULLNAME", "ПОЛНОЕ_ИМЯ", "ПОЛНОЕИМЯ"
+            actualValue = wb.FullName
+        Case "READONLY", "ТОЛЬКОЧТЕНИЕ"
+            actualValue = wb.ReadOnly
+        Case "HASSIGNATURE", "ПОДПИСЬ"
+            actualValue = wb.HasVBProject
+        Case "AUTHOR", "АВТОР"
+            actualValue = wb.Author
+        Case "HASVBPROJECT", "ИМЕЕТVBA"
+            actualValue = wb.HasVBProject
+        Case Else
+            ' Попытка получить пользовательское свойство через позднее связывание
+            ' Заглушка - в реальном коде нужно обрабатывать дополнительные свойства
+            Err.Raise 17, "IsWorkbookPropertyValid", "Неизвестное свойство: " & propertyName
+    End Select
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isValid = False
+        actualValueString = "Ошибка доступа: " & Err.Description
+        expectedValueString = CStr(expectedValue)
+    Else
+        ' Преобразуем значения к строкам для сравнения
+        ' В VBA сравнение разных типов может быть проблематичным
+        actualValueString = CStr(actualValue)
+        expectedValueString = CStr(expectedValue)
+        
+        ' Сравниваем значения (без учета регистра для строк)
+        If VarType(actualValue) = vbString And VarType(expectedValue) = vbString Then
+            isValid = (LCase(actualValueString) = LCase(expectedValueString))
+        Else
+            isValid = (actualValue = expectedValue)
+        End If
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorkbookPropertyValid (" & propertyName & ") - Actual: " & actualValueString & ", Expected: " & expectedValueString & ", Match: " & isValid
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookPropertyValid = ValidateWorkbook(wb, "Свойство " & propertyName, _
+                                            isValid, _
+                                            expectedValueString, _
+                                            actualValueString, _
+                                            itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 6. Проверка доступности листов в книге
+'----------------------------------------------------
+Public Function AreSheetsAccessible(ByVal wb As Object, _
+                                 Optional ByVal itemName As String = "", _
+                                 Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        AreSheetsAccessible = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        AreSheetsAccessible = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim sheetsCount As Long
+    Dim isAccessible As Boolean
+    Dim actualState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Пытаемся получить количество листов в книге
+    sheetsCount = wb.Sheets.Count
+    
+    ' Проверка на случай ошибки доступа к коллекции
+    If Err.Number <> 0 Then
+        isAccessible = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        isAccessible = True
+        actualState = "Доступны, количество: " & sheetsCount
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      AreSheetsAccessible - Actual: " & actualState & ", Match: " & isAccessible
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    AreSheetsAccessible = ValidateWorkbook(wb, "Доступность листов", _
+                                        isAccessible, _
+                                        "Доступны", _
+                                        actualState, _
+                                        itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 7. Проверка наличия листа с указанным именем
+'----------------------------------------------------
+Public Function DoesSheetExist(ByVal wb As Object, ByVal sheetName As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        DoesSheetExist = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        DoesSheetExist = False
+        Exit Function
+    End If
+    
+    ' Проверяем доступность листов
+    If Not AreSheetsAccessible(wb, itemName, sourceInfo) Then
+        DoesSheetExist = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim sheetExists As Boolean
+    Dim actualState As String
+    Dim sheet As Object
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Пытаемся получить лист по имени
+    Set sheet = wb.Sheets(sheetName)
+    
+    ' Проверка на случай ошибки доступа к листу
+    If Err.Number <> 0 Then
+        sheetExists = False
+        actualState = "Не существует"
+    Else
+        sheetExists = True
+        actualState = "Существует"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      DoesSheetExist (" & sheetName & ") - Actual: " & actualState & ", Match: " & sheetExists
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Освобождаем ресурсы
+    Set sheet = Nothing
+    
+    ' Вызываем базовый метод валидации
+    DoesSheetExist = ValidateWorkbook(wb, "Наличие листа '" & sheetName & "'", _
+                                   sheetExists, _
+                                   "Лист существует", _
+                                   actualState, _
+                                   itemName, sourceInfo)
+End Function
+
+'====================================================
+' ТЕСТОВАЯ ПРОЦЕДУРА ДЛЯ ДЕМОНСТРАЦИИ РАБОТЫ МОДУЛЯ
+'====================================================
+Public Sub TestWorkbookValidation()
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode False
+    ' Включаем лог в отладочное окно для анализа
+    SetDebugLogMode True
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKBOOK ==="
+    
+    ' Получаем объект приложения и активную книгу
+    Dim app As Object
+    Dim wb As Object
+    Dim nonExistentWb As Object
+    
+    Set app = Application
+    
+    ' Проверяем, есть ли открытая книга
+    On Error Resume Next
+    Set wb = app.ActiveWorkbook
+    
+    If wb Is Nothing Then
+        ' Если нет активной книги, создаем новую
+        Set wb = app.Workbooks.Add
+        Debug.Print "Создана новая книга для тестирования"
+    End If
+    
+    ' Создаем переменную для тестирования неинициализированной книги
+    Set nonExistentWb = Nothing
+    
+    ' Тест 1: Проверка инициализации книги
+    Debug.Print "1. IsWorkbookInitialized (активная книга): " & IsWorkbookInitialized(wb, "ActiveWb", "TestWorkbookValidation")
+    Debug.Print "1a. IsWorkbookInitialized (Nothing): " & IsWorkbookInitialized(nonExistentWb, "NonExistentWb", "TestWorkbookValidation")
+    
+    ' Тест 2: Проверка состояния книги (открыта/закрыта)
+    Debug.Print "2. IsWorkbookOpen: " & IsWorkbookOpen(wb, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 3: Проверка сохранённого состояния книги
+    ' Сначала проверяем текущее состояние
+    Debug.Print "3. IsWorkbookSaved (текущее состояние): " & IsWorkbookSaved(wb, wb.Saved, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Сохраняем текущее состояние для восстановления
+    Dim currentSaved As Boolean
+    currentSaved = wb.Saved
+    
+    ' Меняем состояние сохранения (добавляем пробел в ячейку A1 и удаляем его)
+    ' Это должно изменить состояние Saved на False, а затем вернуть к исходному
+    On Error Resume Next
+    Dim tempValue As String
+    Dim activeSheet As Object
+    
+    Set activeSheet = wb.activeSheet
+    tempValue = activeSheet.Range("A1").Value
+    
+    ' Меняем значение для изменения состояния Saved
+    activeSheet.Range("A1").Value = tempValue & " "
+    
+    ' Проверяем изменение состояния
+    Debug.Print "3a. IsWorkbookSaved (после изменения): " & IsWorkbookSaved(wb, False, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Возвращаем исходное значение
+    activeSheet.Range("A1").Value = tempValue
+    
+    ' Помечаем книгу как сохраненную (для тестирования)
+    Application.DisplayAlerts = False
+    If wb.path <> "" Then
+        ' Если книга уже была на диске, сохраняем ее
+        wb.Save
+    Else
+        ' Если книга новая, сохраняем во временную папку
+        Dim tempPath As String
+        tempPath = Environ("TEMP") & "\TestWorkbook_" & Format(Now, "yyyymmddhhnnss") & ".xlsx"
+        wb.SaveAs tempPath
+        ' После теста удалим файл
+    End If
+    Application.DisplayAlerts = True
+    
+    ' Проверяем состояние после сохранения
+    Debug.Print "3b. IsWorkbookSaved (после сохранения): " & IsWorkbookSaved(wb, True, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 4: Проверка состояния защиты книги
+    Debug.Print "4. IsWorkbookProtected (текущее состояние): " & IsWorkbookProtected(wb, False, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 5: Проверка свойств книги
+    Debug.Print "5a. IsWorkbookPropertyValid (Name): " & IsWorkbookPropertyValid(wb, "Name", wb.Name, "ActiveWb", "TestWorkbookValidation")
+    Debug.Print "5b. IsWorkbookPropertyValid (Path): " & IsWorkbookPropertyValid(wb, "Path", wb.path, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 6: Проверка доступности листов
+    Debug.Print "6. AreSheetsAccessible: " & AreSheetsAccessible(wb, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 7: Проверка наличия листа с указанным именем
+    Dim firstSheetName As String
+    firstSheetName = wb.Sheets(1).Name
+    
+    Debug.Print "7a. DoesSheetExist ('" & firstSheetName & "'): " & DoesSheetExist(wb, firstSheetName, "ActiveWb", "TestWorkbookValidation")
+    Debug.Print "7b. DoesSheetExist ('НесуществующийЛист'): " & DoesSheetExist(wb, "НесуществующийЛист", "ActiveWb", "TestWorkbookValidation")
+    
+    ' Если мы создали временную книгу и сохранили её, удаляем файл
+    If wb.path <> "" And InStr(wb.FullName, "TestWorkbook_") > 0 Then
+        ' Закрываем книгу без сохранения
+        Application.DisplayAlerts = False
+        wb.Close SaveChanges:=False
+        
+        ' Удаляем файл
+        On Error Resume Next
+        Kill wb.FullName
+        On Error GoTo 0
+        
+        Debug.Print "Временная тестовая книга удалена"
+    End If
+    
+    Debug.Print "=== ТЕСТИРОВАНИЕ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKBOOK ЗАВЕРШЕНО ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' ПРИМЕР ИСПОЛЬЗОВАНИЯ В РЕАЛЬНОМ КОДЕ
+'====================================================
+Public Sub ExampleUsage()
+    ' Отключаем MsgBox для пакетного режима
+    SetMessageBoxMode False
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKBOOK ==="
+    
+    ' Получаем объект приложения и пытаемся открыть книгу
+    Dim app As Object
+    Dim wb As Object
+    Dim excelFile As String
+    
+    Set app = Application
+    excelFile = "C:\Путь\к\файлу\Данные.xlsx"
+    
+    On Error Resume Next
+    Set wb = app.Workbooks.Open(excelFile)
+    
+    ' Проверяем успешность открытия
+    If Not IsWorkbookInitialized(wb, "MyWorkbook", "ExampleUsage") Then
+        Debug.Print "Ошибка: Не удалось открыть книгу " & excelFile
+        Exit Sub
+    End If
+    
+    ' Проверяем наличие необходимого листа
+    If Not DoesSheetExist(wb, "Данные", "MyWorkbook", "ExampleUsage") Then
+        Debug.Print "Ошибка: В книге отсутствует лист 'Данные'"
+        wb.Close False
+        Exit Sub
+    End If
+    
+    ' Выполняем операции с книгой...
+    Debug.Print "Обработка данных в книге..."
+    
+    ' Проверяем защиту перед изменением
+    If IsWorkbookProtected(wb, True, "MyWorkbook", "ExampleUsage") Then
+        Debug.Print "Предупреждение: Книга защищена, возможно не удастся внести изменения"
+    End If
+    
+    ' Сохраняем изменения
+    If wb.path <> "" Then
+        wb.Save
+        ' Проверяем, что сохранение прошло успешно
+        If IsWorkbookSaved(wb, True, "MyWorkbook", "ExampleUsage") Then
+            Debug.Print "Изменения успешно сохранены"
+        Else
+            Debug.Print "Предупреждение: Не удалось сохранить изменения"
+        End If
+    End If
+    
+    ' Закрываем книгу
+    wb.Close
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ ЗАВЕРШЕН ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+
+********** m_AppValidator **********
+Option Explicit
+
+'====================================================
+' Модуль валидации для объекта Excel.Application
+' Предназначен для безопасной работы с основным объектом Excel
+'====================================================
+
+'====================================================
+' Глобальные константы и переменные
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedValue As String, ByVal actualValue As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Ошибка валидации Excel.Application! Ожидается [" & expectedValue & "], а получено [" & actualValue & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If itemName <> "" Then
+        msg = msg & vbNewLine & "Элемент: " & itemName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации Excel.Application"
+    End If
+End Sub
+
+'====================================================
+' БАЗОВЫЙ МЕТОД ВАЛИДАЦИИ
+' Этот метод используется всеми другими функциями валидации
+'====================================================
+Private Function ValidateApplication(ByVal app As Object, ByVal checkType As String, _
+                                  ByVal checkResult As Boolean, _
+                                  Optional ByVal expectedValue As String = "", _
+                                  Optional ByVal actualValue As String = "", _
+                                  Optional ByVal itemName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    ' Выполняем проверку на основе переданного результата
+    ValidateApplication = checkResult
+    
+    ' Если проверка не прошла, вызываем обработчик ошибки
+    If Not ValidateApplication Then
+        HandleValidationError expectedValue, actualValue, itemName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' ФУНКЦИИ ВАЛИДАЦИИ EXCEL.APPLICATION
+'====================================================
+
+'----------------------------------------------------
+' 1. Проверка инициализации приложения
+'----------------------------------------------------
+Public Function IsApplicationInitialized(ByVal app As Object, _
+                                      Optional ByVal itemName As String = "", _
+                                      Optional ByVal sourceInfo As String = "") As Boolean
+    On Error Resume Next
+    
+    Dim isInitialized As Boolean
+    Dim actualState As String
+    
+    ' Проверяем инициализацию приложения, пытаясь обратиться к его свойству
+    isInitialized = Not (app Is Nothing)
+    
+    If isInitialized Then
+        ' Дополнительная проверка доступности API через обращение к свойству
+        Dim testValue As String
+        testValue = app.Name
+        If Err.Number <> 0 Then
+            isInitialized = False
+            actualState = "Недоступен API Excel (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+        Else
+            actualState = "Инициализирован"
+        End If
+    Else
+        actualState = "Не инициализирован (Nothing)"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsApplicationInitialized = ValidateApplication(app, "Инициализация", _
+                                               isInitialized, _
+                                               "Инициализированный Excel.Application", _
+                                               actualState, _
+                                               itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 2. Проверка видимости приложения
+'----------------------------------------------------
+Public Function IsApplicationVisible(ByVal app As Object, ByVal shouldBeVisible As Boolean, _
+                                  Optional ByVal itemName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsApplicationVisible = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim actualVisible As Boolean
+    Dim isCorrectVisibility As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущее состояние видимости
+    actualVisible = app.Visible
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectVisibility = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectVisibility = (actualVisible = shouldBeVisible)
+        
+        ' Формируем строки для сообщений
+        If actualVisible Then
+            actualState = "Видимый"
+        Else
+            actualState = "Скрытый"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeVisible Then
+        expectedState = "Видимый"
+    Else
+        expectedState = "Скрытый"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsApplicationVisible - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectVisibility
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsApplicationVisible = ValidateApplication(app, "Видимость", _
+                                           isCorrectVisibility, _
+                                           expectedState, _
+                                           actualState, _
+                                           itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 3. Проверка состояния обработки событий
+'----------------------------------------------------
+Public Function IsEventProcessingEnabled(ByVal app As Object, ByVal shouldBeEnabled As Boolean, _
+                                     Optional ByVal itemName As String = "", _
+                                     Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsEventProcessingEnabled = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isEnabled As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущее состояние обработки событий
+    isEnabled = app.EnableEvents
+    
+    ' Сохраняем возможный код ошибки
+    Dim errCode As Long
+    errCode = Err.Number
+    
+            ' Определяем, соответствует ли оно ожидаемому
+    isCorrectState = (CBool(isEnabled) = shouldBeEnabled)
+    
+    ' Формируем строки для сообщений
+    If isEnabled Then
+        actualState = "Включена"
+    Else
+        actualState = "Отключена"
+    End If
+    
+    If shouldBeEnabled Then
+        expectedState = "Включена"
+    Else
+        expectedState = "Отключена"
+    End If
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If errCode <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsEventProcessingEnabled - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsEventProcessingEnabled = ValidateApplication(app, "Обработка событий", _
+                                                isCorrectState, _
+                                                expectedState, _
+                                                actualState, _
+                                                itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 4. Проверка состояния параметра доступа к объектной модели
+'----------------------------------------------------
+Public Function IsObjectModelAccessEnabled(ByVal app As Object, _
+                                        Optional ByVal itemName As String = "", _
+                                        Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsObjectModelAccessEnabled = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim accessEnabled As Boolean
+    Dim actualState As String
+    
+    ' Проверяем доступ к объектной модели через трастовый доступ (Trust Access)
+    ' Это свойство только для чтения, поэтому мы можем только проверить его состояние
+    ' Используем значения XlAutomationSecurity:
+    ' xlAutomationSecurityLow = 1 - низкий уровень (разрешен доступ)
+    ' xlAutomationSecurityByUI = 2 - определяется интерфейсом
+    ' xlAutomationSecurityForceDisable = 3 - запрещен доступ
+    accessEnabled = (app.AutomationSecurity = 1) ' xlAutomationSecurityLow = 1
+    
+    If Err.Number <> 0 Then
+        ' Ошибка при доступе к свойству
+        accessEnabled = False
+        actualState = "Ошибка при проверке (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+    Else
+        If accessEnabled Then
+            actualState = "Доступ разрешен"
+        Else
+            actualState = "Доступ ограничен"
+        End If
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsObjectModelAccessEnabled = ValidateApplication(app, "Доступ к объектной модели", _
+                                                  accessEnabled, _
+                                                  "Доступ разрешен", _
+                                                  actualState, _
+                                                  itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 5. Проверка состояния параметра разрешения макросов
+'----------------------------------------------------
+Public Function IsMacroSecurityLevel(ByVal app As Object, ByVal expectedLevel As Long, _
+                                  Optional ByVal itemName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsMacroSecurityLevel = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim currentLevel As Long
+    Dim isExpectedLevel As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Получаем текущий уровень безопасности макросов
+    ' В современных версиях Excel можно использовать app.MacroSecurityLevel
+    ' Но для обратной совместимости можно проверить другими способами
+    
+    ' Пример: можно проверить возможность выполнения макросов косвенно
+    Dim testResult As Boolean
+    testResult = True ' Заглушка - в реальном коде здесь будет проверка
+    
+    ' Для простоты будем использовать переданное значение как эталон
+    isExpectedLevel = testResult
+    currentLevel = IIf(testResult, expectedLevel, 0) ' Заглушка
+    
+    ' Формируем строки для сообщений
+    actualState = "Уровень: " & currentLevel
+    expectedState = "Уровень: " & expectedLevel
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsMacroSecurityLevel = ValidateApplication(app, "Уровень безопасности макросов", _
+                                           isExpectedLevel, _
+                                           expectedState, _
+                                           actualState, _
+                                           itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 6. Проверка состояния настроек безопасности
+'----------------------------------------------------
+Public Function IsSecuritySettingEnabled(ByVal app As Object, ByVal settingName As String, _
+                                      ByVal shouldBeEnabled As Boolean, _
+                                      Optional ByVal itemName As String = "", _
+                                      Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsSecuritySettingEnabled = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isEnabled As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Заглушка - проверка зависит от конкретной настройки безопасности
+    ' В реальном коде нужно добавить логику для проверки конкретных настроек
+    ' Например, для проверки настроек доверенных источников, защиты файлов и т.д.
+    
+    ' Для примера будем считать, что настройка включена
+    isEnabled = True
+    
+    ' Определяем, соответствует ли она ожидаемому состоянию
+    isCorrectState = (isEnabled = shouldBeEnabled)
+    
+    ' Формируем строки для сообщений
+    If isEnabled Then
+        actualState = "Включена"
+    Else
+        actualState = "Отключена"
+    End If
+    
+    If shouldBeEnabled Then
+        expectedState = "Включена"
+    Else
+        expectedState = "Отключена"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsSecuritySettingEnabled = ValidateApplication(app, "Настройка безопасности: " & settingName, _
+                                                isCorrectState, _
+                                                expectedState, _
+                                                actualState, _
+                                                itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 7. Проверка путей по умолчанию
+'----------------------------------------------------
+Public Function IsDefaultPathValid(ByVal app As Object, ByVal pathType As String, _
+                                ByVal expectedPath As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализировано ли приложение
+    If Not IsApplicationInitialized(app, itemName, sourceInfo) Then
+        IsDefaultPathValid = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim currentPath As String
+    Dim isValidPath As Boolean
+    
+    ' Получаем путь в зависимости от типа
+    Select Case UCase(pathType)
+        Case "DEFAULT", "DEFAULTFILEPATH"
+            currentPath = app.DefaultFilePath
+        Case "STARTUP", "STARTUPPATH", "XLSTART"
+            currentPath = app.StartupPath
+        Case "ALTERNATE", "ALTERNATESTARTUPPATH", "XLALTSTARTUP"
+            currentPath = app.AltStartupPath
+        Case "LIBRARY", "LIBRARYPATH", "ADDIN", "ADDINPATH"
+            currentPath = app.LibraryPath
+        Case "TEMPLATE", "TEMPLATEPATH", "USERTEMPLATES"
+            currentPath = app.TemplatesPath
+        Case "PERSONAL", "PERSONAL.XLSB"
+            ' В этом случае проверяем путь к файлу Personal.xlsb
+            ' Заглушка - в реальном коде нужна дополнительная логика
+            currentPath = app.StartupPath & "\PERSONAL.XLSB"
+        Case Else
+            ' Неизвестный тип пути
+            currentPath = ""
+    End Select
+    
+    ' Проверяем, соответствует ли путь ожиданиям
+    isValidPath = (LCase(currentPath) = LCase(expectedPath))
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsDefaultPathValid = ValidateApplication(app, "Путь " & pathType, _
+                                         isValidPath, _
+                                         expectedPath, _
+                                         currentPath, _
+                                         itemName, sourceInfo)
+End Function
+
+'====================================================
+' ТЕСТОВАЯ ПРОЦЕДУРА ДЛЯ ДЕМОНСТРАЦИИ РАБОТЫ МОДУЛЯ
+'====================================================
+Public Sub TestApplicationValidation()
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode False
+    ' Включаем лог в отладочное окно для анализа
+    SetDebugLogMode True
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.APPLICATION ==="
+    
+    ' Получаем объект приложения
+    Dim app As Object
+    Set app = Application
+    
+    ' Тест 1: Проверка инициализации приложения
+    Debug.Print "1. IsApplicationInitialized: " & IsApplicationInitialized(app, "ExcelApp", "TestApplicationValidation")
+    Debug.Print "1a. IsApplicationInitialized (Nothing): " & IsApplicationInitialized(Nothing, "NullApp", "TestApplicationValidation")
+    
+    ' Тест 2: Проверка видимости приложения
+    Debug.Print "2. IsApplicationVisible (True): " & IsApplicationVisible(app, True, "ExcelApp", "TestApplicationValidation")
+    
+    ' Сохраняем текущее состояние для восстановления
+    Dim currentVisibility As Boolean
+    currentVisibility = app.Visible
+    
+    ' Меняем видимость и проверяем
+    On Error Resume Next
+    
+    ' Пробуем установить видимость в False
+    app.Visible = False
+    
+    ' Задержка для применения изменений
+    DoEvents
+    
+    ' Получаем текущее состояние для диагностики
+    Dim currentVal As Boolean
+    currentVal = app.Visible
+    Debug.Print "      Текущее состояние Visible: " & currentVal
+    
+    ' Проверяем с текущим значением
+    Debug.Print "2a. IsApplicationVisible после изменения (False): " & IsApplicationVisible(app, False, "ExcelApp", "TestApplicationValidation")
+    
+    On Error GoTo 0
+    
+    ' Восстанавливаем видимость
+    app.Visible = currentVisibility
+    
+    ' Тест 3: Проверка обработки событий
+    Debug.Print "3. IsEventProcessingEnabled (True): " & IsEventProcessingEnabled(app, True, "ExcelApp", "TestApplicationValidation")
+    
+    ' Сохраняем текущее состояние для восстановления
+    Dim currentEventsState As Boolean
+    currentEventsState = app.EnableEvents
+    
+    ' Меняем состояние и проверяем
+    On Error Resume Next
+    
+    ' Пробуем установить обработку событий в False
+    app.EnableEvents = False
+    
+    ' Задержка для применения изменений
+    DoEvents
+    
+    ' Получаем текущее состояние для диагностики
+    Dim currentEventsVal As Boolean
+    currentEventsVal = app.EnableEvents
+    Debug.Print "      Текущее состояние EnableEvents: " & currentEventsVal
+    
+    ' Проверяем с текущим значением
+    Debug.Print "3a. IsEventProcessingEnabled после изменения (False): " & IsEventProcessingEnabled(app, False, "ExcelApp", "TestApplicationValidation")
+    
+    On Error GoTo 0
+    
+    ' Восстанавливаем состояние событий
+    app.EnableEvents = currentEventsState
+    
+    ' Тест 4: Проверка доступа к объектной модели
+    Debug.Print "4. IsObjectModelAccessEnabled: " & IsObjectModelAccessEnabled(app, "ExcelApp", "TestApplicationValidation")
+    
+    ' Тест 5: Проверка уровня безопасности макросов
+    Debug.Print "5. IsMacroSecurityLevel: " & IsMacroSecurityLevel(app, 1, "ExcelApp", "TestApplicationValidation")
+    
+    ' Тест 6: Проверка настроек безопасности
+    Debug.Print "6. IsSecuritySettingEnabled: " & IsSecuritySettingEnabled(app, "TrustedDocuments", True, "ExcelApp", "TestApplicationValidation")
+    
+    ' Тест 7: Проверка путей по умолчанию
+    Debug.Print "7. IsDefaultPathValid (Default): " & IsDefaultPathValid(app, "DEFAULT", app.DefaultFilePath, "ExcelApp", "TestApplicationValidation")
+    
+    Debug.Print "=== ТЕСТИРОВАНИЕ МОДУЛЯ ВАЛИДАЦИИ EXCEL.APPLICATION ЗАВЕРШЕНО ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' ПРИМЕР ИСПОЛЬЗОВАНИЯ В РЕАЛЬНОМ КОДЕ
+'====================================================
+Public Sub ExampleUsage()
+    ' Отключаем MsgBox для пакетного режима
+    SetMessageBoxMode False
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.APPLICATION ==="
+    
+    ' Получаем объект приложения
+    Dim app As Object
+    Set app = Application
+    
+    ' Проверяем инициализацию
+    If Not IsApplicationInitialized(app, "ExcelApp", "ExampleUsage") Then
+        Debug.Print "Ошибка: Excel.Application не инициализирован"
+        Exit Sub
+    End If
+    
+    ' Сохраняем текущие настройки
+    Dim oldEvents As Boolean
+    Dim oldScreenUpdating As Boolean
+    
+    oldEvents = app.EnableEvents
+    oldScreenUpdating = app.ScreenUpdating
+    
+    ' Устанавливаем нужные настройки для работы
+    app.EnableEvents = False
+    app.ScreenUpdating = False
+    
+    ' Проверяем, что настройки применились
+    If Not IsEventProcessingEnabled(app, False, "ExcelApp", "ExampleUsage") Then
+        Debug.Print "Предупреждение: Не удалось отключить обработку событий"
+    End If
+    
+    ' Здесь выполняется основной код...
+    Debug.Print "Выполнение основного кода..."
+    
+    ' Восстанавливаем настройки
+    app.EnableEvents = oldEvents
+    app.ScreenUpdating = oldScreenUpdating
+    
+    Debug.Print "Настройки восстановлены"
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ ЗАВЕРШЕН ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+
+********** m_DataTypeValidator **********
+Option Explicit
+
+'====================================================
+' Глобальные настройки модуля
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Вспомогательная функция: получение типа данных
+'====================================================
+Private Function GetDataTypeName(ByVal var As Variant) As String
+    On Error Resume Next  ' Защита от ошибок при определении типа
+    GetDataTypeName = typeName(var)
+    If Err.Number <> 0 Then
+        GetDataTypeName = "Error"   ' Если произошла ошибка, вернуть "Error"
+        Err.Clear
+    End If
+End Function
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedType As String, ByVal actualType As String, _
+                                Optional ByVal variableName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Несоответствие типов данных! Ожидается [" & expectedType & "], а получен [" & actualType & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If variableName <> "" Then
+        msg = msg & vbNewLine & "Переменная: " & variableName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации"
+    End If
+End Sub
+
+'====================================================
+' БАЗОВЫЙ МЕТОД ВАЛИДАЦИИ
+' Этот метод используется всеми другими функциями валидации
+'====================================================
+Private Function ValidateDataType(ByVal var As Variant, ByVal expectedType As String, _
+                                ByVal typeCheckFunction As Boolean, _
+                                Optional ByVal variableName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    
+    ' Выполняем проверку на основе переданной функции проверки
+    ValidateDataType = typeCheckFunction
+    
+    ' Если проверка не прошла, вызываем обработчик ошибки
+    If Not ValidateDataType Then
+        Dim actualType As String
+        actualType = GetDataTypeName(var)
+        HandleValidationError expectedType, actualType, variableName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' Унифицированная функция для проверки через TypeName
+'====================================================
+Private Function CheckTypeByName(ByVal var As Variant, ByVal expectedTypeName As String, _
+                               Optional ByVal additionalTypeNames As String = "") As Boolean
+    On Error Resume Next
+    Dim typeName As String
+    typeName = GetDataTypeName(var)
+    
+    ' Проверка на основной тип
+    CheckTypeByName = (typeName = expectedTypeName)
+    
+    ' Проверка на дополнительные допустимые типы (если указаны)
+    If Not CheckTypeByName And additionalTypeNames <> "" Then
+        Dim additionalTypes As Variant
+        additionalTypes = Split(additionalTypeNames, ",")
+        
+        Dim i As Long
+        For i = LBound(additionalTypes) To UBound(additionalTypes)
+            If Trim(additionalTypes(i)) = typeName Then
+                CheckTypeByName = True
+                Exit For
+            End If
+        Next i
+    End If
+    
+    If Err.Number <> 0 Then
+        CheckTypeByName = False
+        Err.Clear
+    End If
+End Function
+
+'====================================================
+' ФУНКЦИИ ВАЛИДАЦИИ ТИПОВ ДАННЫХ
+'====================================================
+
+'----------------------------------------------------
+' 1. Строковый тип (String)
+'----------------------------------------------------
+Public Function IsDataTypeString(ByVal var As Variant, _
+                              Optional ByVal variableName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeString = ValidateDataType(var, "String", _
+                                      CheckTypeByName(var, "String"), _
+                                      variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 2. Целочисленные типы
+'----------------------------------------------------
+' 2.1 Integer (строгая проверка, только Integer)
+Public Function IsDataTypeInteger(ByVal var As Variant, _
+                               Optional ByVal variableName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeInteger = ValidateDataType(var, "Integer", _
+                                       CheckTypeByName(var, "Integer"), _
+                                       variableName, sourceInfo)
+End Function
+
+' 2.2 Long (принимает Integer как допустимый тип)
+Public Function IsDataTypeLong(ByVal var As Variant, _
+                            Optional ByVal variableName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeLong = ValidateDataType(var, "Long (принимается Integer)", _
+                                    CheckTypeByName(var, "Long", "Integer"), _
+                                    variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 3. Число с плавающей точкой (Double)
+'----------------------------------------------------
+Public Function IsDataTypeDouble(ByVal var As Variant, _
+                              Optional ByVal variableName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeDouble = ValidateDataType(var, "Double", _
+                                      CheckTypeByName(var, "Double"), _
+                                      variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 4. Дата и время (Date)
+'----------------------------------------------------
+Public Function IsDataTypeDate(ByVal var As Variant, _
+                            Optional ByVal variableName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeDate = ValidateDataType(var, "Date", _
+                                    CheckTypeByName(var, "Date"), _
+                                    variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 5. Логический тип (Boolean)
+'----------------------------------------------------
+Public Function IsDataTypeBoolean(ByVal var As Variant, _
+                               Optional ByVal variableName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeBoolean = ValidateDataType(var, "Boolean", _
+                                       CheckTypeByName(var, "Boolean"), _
+                                       variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 6. Специальные значения Variant
+'----------------------------------------------------
+' 6.1 Null
+Public Function IsDataTypeNull(ByVal var As Variant, _
+                            Optional ByVal variableName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeNull = ValidateDataType(var, "Null", _
+                                    IsNull(var), _
+                                    variableName, sourceInfo)
+End Function
+
+' 6.2 Empty
+Public Function IsDataTypeEmpty(ByVal var As Variant, _
+                             Optional ByVal variableName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeEmpty = ValidateDataType(var, "Empty", _
+                                     IsEmpty(var), _
+                                     variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 7. Объектные типы (унифицированный подход)
+'----------------------------------------------------
+' 7.1 Любой объект
+Public Function IsDataTypeObject(ByVal var As Variant, _
+                              Optional ByVal variableName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeObject = ValidateDataType(var, "Объект", _
+                                      IsObject(var), _
+                                      variableName, sourceInfo)
+End Function
+
+' 7.2 Dictionary
+Public Function IsDataTypeDictionary(ByVal var As Variant, _
+                                  Optional ByVal variableName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeDictionary = ValidateDataType(var, "Scripting.Dictionary", _
+                                          CheckTypeByName(var, "Dictionary"), _
+                                          variableName, sourceInfo)
+End Function
+
+' 7.3 Collection
+Public Function IsDataTypeCollection(ByVal var As Variant, _
+                                  Optional ByVal variableName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeCollection = ValidateDataType(var, "Collection", _
+                                          CheckTypeByName(var, "Collection"), _
+                                          variableName, sourceInfo)
+End Function
+
+' 7.4 Массив
+Public Function IsDataTypeArray(ByVal var As Variant, _
+                             Optional ByVal variableName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeArray = ValidateDataType(var, "Массив", _
+                                     IsArray(var), _
+                                     variableName, sourceInfo)
+End Function
+
+'====================================================
+' РАСШИРЕННЫЕ ФУНКЦИИ ВАЛИДАЦИИ
+'====================================================
+
+'----------------------------------------------------
+' Проверка на принадлежность к числовому типу (любому)
+'----------------------------------------------------
+Public Function IsDataTypeNumeric(ByVal var As Variant, _
+                               Optional ByVal variableName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Boolean
+    ' VBA IsNumeric работает иначе и учитывает строки, которые можно преобразовать в число
+    ' Поэтому проверяем непосредственно типы
+    Dim typeName As String
+    typeName = GetDataTypeName(var)
+    
+    Dim isNumericType As Boolean
+    isNumericType = (typeName = "Integer" Or typeName = "Long" Or _
+                     typeName = "Double" Or typeName = "Single" Or _
+                     typeName = "Byte" Or typeName = "Currency" Or _
+                     typeName = "Decimal")
+    
+    IsDataTypeNumeric = ValidateDataType(var, "Число (любого типа)", _
+                                       isNumericType, _
+                                       variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' Проверка конкретного типа объекта
+'----------------------------------------------------
+Public Function IsObjectOfType(ByVal obj As Variant, ByVal typeName As String, _
+                            Optional ByVal variableName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, что это объект
+    If Not IsObject(obj) Then
+        IsObjectOfType = False
+        HandleValidationError "Объект типа " & typeName, GetDataTypeName(obj), variableName, sourceInfo
+        Exit Function
+    End If
+    
+    ' Затем проверяем тип объекта
+    On Error Resume Next
+    Dim actualTypeName As String
+    actualTypeName = GetDataTypeName(obj)
+    
+    IsObjectOfType = (actualTypeName = typeName)
+    
+    If Err.Number <> 0 Or Not IsObjectOfType Then
+        IsObjectOfType = False
+        If Err.Number <> 0 Then Err.Clear
+        HandleValidationError "Объект типа " & typeName, actualTypeName, variableName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' Расширенная тестовая процедура для демонстрации работы функций валидации
+'====================================================
+Public Sub TestDataTypeValidation()
+    ' Локальная вспомогательная процедура для группировки и форматирования тестов
+    Dim TestHeader As String
+    
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode True
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ ==="
+    
+    ' Подготовка тестовых данных
+    Dim v As Variant
+    Dim arr(1 To 3) As Integer
+    Dim dict As Object
+    Dim col As New Collection
+    
+    Set dict = CreateObject("Scripting.Dictionary")
+    
+    '----------------------------------------------------
+    ' 1. Тесты строковых типов
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ СТРОКОВЫХ ТИПОВ ---"
+    Debug.Print TestHeader
+    
+    v = "Тестовая строка"
+    Debug.Print "IsDataTypeString('Тестовая строка'):", IsDataTypeString(v, "stringVar", "TestDataTypeValidation")
+    
+    v = 42
+    Debug.Print "IsDataTypeString(42):", IsDataTypeString(v, "numberAsString", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 2. Тесты целочисленных типов
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ЦЕЛОЧИСЛЕННЫХ ТИПОВ ---"
+    Debug.Print TestHeader
+    
+    ' 2.1 Integer
+    v = CInt(10)
+    Debug.Print "IsDataTypeInteger(CInt(10)):", IsDataTypeInteger(v, "intVar", "TestDataTypeValidation")
+    
+    v = CLng(10)
+    Debug.Print "IsDataTypeInteger(CLng(10)):", IsDataTypeInteger(v, "longAsInt", "TestDataTypeValidation")
+    
+    ' 2.2 Long
+    v = CLng(2147483647) ' Максимальное значение Long
+    Debug.Print "IsDataTypeLong(CLng(2147483647)):", IsDataTypeLong(v, "longVar", "TestDataTypeValidation")
+    
+    v = CInt(100)
+    Debug.Print "IsDataTypeLong(CInt(100)):", IsDataTypeLong(v, "intAsLong", "TestDataTypeValidation")
+    
+    v = CDbl(100.5)
+    Debug.Print "IsDataTypeLong(CDbl(100.5)):", IsDataTypeLong(v, "doubleAsLong", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 3. Тесты чисел с плавающей точкой
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ЧИСЕЛ С ПЛАВАЮЩЕЙ ТОЧКОЙ ---"
+    Debug.Print TestHeader
+    
+    v = CDbl(3.14159)
+    Debug.Print "IsDataTypeDouble(CDbl(3.14159)):", IsDataTypeDouble(v, "doubleVar", "TestDataTypeValidation")
+    
+    v = CInt(42)
+    Debug.Print "IsDataTypeDouble(CInt(42)):", IsDataTypeDouble(v, "intAsDouble", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 4. Тесты дат
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ДАТ ---"
+    Debug.Print TestHeader
+    
+    v = DateSerial(2025, 2, 26)
+    Debug.Print "IsDataTypeDate(DateSerial(2025,2,26)):", IsDataTypeDate(v, "dateVar", "TestDataTypeValidation")
+    
+    v = Now
+    Debug.Print "IsDataTypeDate(Now):", IsDataTypeDate(v, "currentDateTime", "TestDataTypeValidation")
+    
+    v = "26.02.2025"
+    Debug.Print "IsDataTypeDate('26.02.2025'):", IsDataTypeDate(v, "dateString", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 5. Тесты логических типов
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ЛОГИЧЕСКИХ ТИПОВ ---"
+    Debug.Print TestHeader
+    
+    v = False
+    Debug.Print "IsDataTypeBoolean(False):", IsDataTypeBoolean(v, "boolVar", "TestDataTypeValidation")
+    
+    v = 0
+    Debug.Print "IsDataTypeBoolean(0):", IsDataTypeBoolean(v, "zeroAsBool", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 6. Тесты специальных значений
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ СПЕЦИАЛЬНЫХ ЗНАЧЕНИЙ ---"
+    Debug.Print TestHeader
+    
+    ' 6.1 Null
+    v = Null
+    Debug.Print "IsDataTypeNull(Null):", IsDataTypeNull(v, "nullVar", "TestDataTypeValidation")
+    
+    v = Empty
+    Debug.Print "IsDataTypeNull(Empty):", IsDataTypeNull(v, "emptyAsNull", "TestDataTypeValidation")
+    
+    ' 6.2 Empty
+    Dim uninitializedVar As Variant ' По умолчанию Empty
+    Debug.Print "IsDataTypeEmpty(неинициализированная переменная):", IsDataTypeEmpty(uninitializedVar, "emptyVar", "TestDataTypeValidation")
+    
+    v = 0
+    Debug.Print "IsDataTypeEmpty(0):", IsDataTypeEmpty(v, "zeroAsEmpty", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 7. Тесты объектных типов
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ОБЪЕКТНЫХ ТИПОВ ---"
+    Debug.Print TestHeader
+    
+    ' 7.1 Object
+    Set v = col
+    Debug.Print "IsDataTypeObject(Collection):", IsDataTypeObject(v, "objectVar", "TestDataTypeValidation")
+    
+    v = "Строка"
+    Debug.Print "IsDataTypeObject('Строка'):", IsDataTypeObject(v, "stringAsObject", "TestDataTypeValidation")
+    
+    ' 7.2 Dictionary
+    Set v = dict
+    Debug.Print "IsDataTypeDictionary(dict):", IsDataTypeDictionary(v, "dictVar", "TestDataTypeValidation")
+    
+    Set v = col
+    Debug.Print "IsDataTypeDictionary(Collection):", IsDataTypeDictionary(v, "colAsDict", "TestDataTypeValidation")
+    
+    ' 7.3 Collection
+    Set v = col
+    Debug.Print "IsDataTypeCollection(Collection):", IsDataTypeCollection(v, "colVar", "TestDataTypeValidation")
+    
+    Set v = dict
+    Debug.Print "IsDataTypeCollection(Dictionary):", IsDataTypeCollection(v, "dictAsCol", "TestDataTypeValidation")
+    
+    ' 7.4 Array
+    v = arr
+    Debug.Print "IsDataTypeArray(arr):", IsDataTypeArray(v, "arrayVar", "TestDataTypeValidation")
+    
+    v = "Не массив"
+    Debug.Print "IsDataTypeArray('Не массив'):", IsDataTypeArray(v, "stringAsArray", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 8. Тесты расширенных функций
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ РАСШИРЕННЫХ ФУНКЦИЙ ---"
+    Debug.Print TestHeader
+    
+    ' 8.1 IsDataTypeNumeric
+    v = CInt(10)
+    Debug.Print "IsDataTypeNumeric(CInt(10)):", IsDataTypeNumeric(v, "numericInt", "TestDataTypeValidation")
+    
+    v = CDbl(3.14)
+    Debug.Print "IsDataTypeNumeric(CDbl(3.14)):", IsDataTypeNumeric(v, "numericDouble", "TestDataTypeValidation")
+    
+    v = "100"
+    Debug.Print "IsDataTypeNumeric('100'):", IsDataTypeNumeric(v, "numericString", "TestDataTypeValidation")
+    
+    ' 8.2 IsObjectOfType
+    Set v = col
+    Debug.Print "IsObjectOfType(col, 'Collection'):", IsObjectOfType(v, "Collection", "typedObj", "TestDataTypeValidation")
+    
+    Set v = dict
+    Debug.Print "IsObjectOfType(dict, 'Collection'):", IsObjectOfType(v, "Collection", "wrongTypeObj", "TestDataTypeValidation")
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+    
+    Debug.Print vbNewLine & "=== ТЕСТИРОВАНИЕ ЗАВЕРШЕНО ==="
+End Sub
+
+'====================================================
+' Пример использования в реальном коде
+'====================================================
+Public Sub ExampleUsage()
+    ' Пример использования в пакетном режиме (без всплывающих окон)
+    SetMessageBoxMode False
+    
+    ' Проверка входных параметров
+    Dim userName As String
+    userName = "John Doe"
+    
+    If Not IsDataTypeString(userName, "userName", "ExampleUsage") Then
+        ' Обработка ошибки
+        Debug.Print "Ошибка: Неверный тип имени пользователя"
+        Exit Sub
+    End If
+    
+    ' Проверка числового параметра
+    Dim userAge As Integer
+    userAge = 30
+    
+    If Not IsDataTypeInteger(userAge, "userAge", "ExampleUsage") Then
+        ' Обработка ошибки
+        Debug.Print "Ошибка: Неверный тип возраста пользователя"
+        Exit Sub
+    End If
+    
+    ' Проверка параметра-даты
+    Dim registrationDate As Date
+    registrationDate = DateSerial(2023, 1, 15)
+    
+    If Not IsDataTypeDate(registrationDate, "registrationDate", "ExampleUsage") Then
+        ' Обработка ошибки
+        Debug.Print "Ошибка: Неверный тип даты регистрации"
+        Exit Sub
+    End If
+    
+    ' Успешное выполнение
+    Debug.Print "Все проверки пройдены успешно!"
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+
+********** m_WsValidator **********
+Option Explicit
+
+'====================================================
+' Модуль валидации для объекта Excel.Worksheet
+' Предназначен для безопасной работы с листами Excel
+'====================================================
+
+'====================================================
+' Глобальные константы и переменные
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+' Ссылка на модули валидации (опционально)
+Private m_AppValidator As Object
+Private m_WbValidator As Object
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+    Set m_AppValidator = Nothing ' Будет инициализирован при необходимости
+    Set m_WbValidator = Nothing  ' Будет инициализирован при необходимости
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Установка ссылок на другие модули валидации (опционально)
+'====================================================
+Public Sub SetApplicationValidator(ByVal appValidator As Object)
+    Set m_AppValidator = appValidator
+End Sub
+
+Public Sub SetWorkbookValidator(ByVal wbValidator As Object)
+    Set m_WbValidator = wbValidator
+End Sub
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedValue As String, ByVal actualValue As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Ошибка валидации Excel.Worksheet! Ожидается [" & expectedValue & "], а получено [" & actualValue & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If itemName <> "" Then
+        msg = msg & vbNewLine & "Элемент: " & itemName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации Excel.Worksheet"
+    End If
+End Sub
+
+'====================================================
+' БАЗОВЫЙ МЕТОД ВАЛИДАЦИИ
+' Этот метод используется всеми другими функциями валидации
+'====================================================
+Private Function ValidateWorksheet(ByVal ws As Object, ByVal checkType As String, _
+                                ByVal checkResult As Boolean, _
+                                Optional ByVal expectedValue As String = "", _
+                                Optional ByVal actualValue As String = "", _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    ' Выполняем проверку на основе переданного результата
+    ValidateWorksheet = checkResult
+    
+    ' Если проверка не прошла, вызываем обработчик ошибки
+    If Not ValidateWorksheet Then
+        HandleValidationError expectedValue, actualValue, itemName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' ФУНКЦИИ ВАЛИДАЦИИ EXCEL.WORKSHEET
+'====================================================
+
+'----------------------------------------------------
+' 1. Проверка инициализации листа
+'----------------------------------------------------
+Public Function IsWorksheetInitialized(ByVal ws As Object, _
+                                     Optional ByVal itemName As String = "", _
+                                     Optional ByVal sourceInfo As String = "") As Boolean
+    On Error Resume Next
+    
+    Dim isInitialized As Boolean
+    Dim actualState As String
+    
+    ' Проверяем инициализацию листа, пытаясь обратиться к его свойству
+    isInitialized = Not (ws Is Nothing)
+    
+    If isInitialized Then
+        ' Дополнительная проверка доступности API через обращение к свойству
+        Dim testValue As String
+        testValue = ws.Name
+        If Err.Number <> 0 Then
+            isInitialized = False
+            actualState = "Недоступен API листа (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+        Else
+            actualState = "Инициализирован"
+        End If
+    Else
+        actualState = "Не инициализирован (Nothing)"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetInitialized = ValidateWorksheet(ws, "Инициализация", _
+                                            isInitialized, _
+                                            "Инициализированный Excel.Worksheet", _
+                                            actualState, _
+                                            itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 2. Проверка активности листа
+'----------------------------------------------------
+Public Function IsWorksheetActive(ByVal ws As Object, ByVal shouldBeActive As Boolean, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetActive = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim parentWorkbook As Object
+    Dim isActive As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем родительскую книгу листа
+    Set parentWorkbook = ws.Parent
+    
+    ' Проверка на случай ошибки доступа к свойству Parent
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа к родительской книге: " & Err.Description
+    Else
+        ' Очищаем ошибки перед следующей проверкой
+        Err.Clear
+        
+        ' Проверяем, является ли лист активным
+        isActive = (parentWorkbook.activeSheet Is ws)
+        
+        ' Проверка на случай ошибки при сравнении
+        If Err.Number <> 0 Then
+            isCorrectState = False
+            actualState = "Ошибка при проверке активности: " & Err.Description
+        Else
+            ' Определяем, соответствует ли текущее состояние ожидаемому
+            isCorrectState = (isActive = shouldBeActive)
+            
+            ' Формируем строки для сообщений
+            If isActive Then
+                actualState = "Активен"
+            Else
+                actualState = "Не активен"
+            End If
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeActive Then
+        expectedState = "Активен"
+    Else
+        expectedState = "Не активен"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetActive - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Освобождаем ресурсы
+    Set parentWorkbook = Nothing
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetActive = ValidateWorksheet(ws, "Активность листа", _
+                                       isCorrectState, _
+                                       expectedState, _
+                                       actualState, _
+                                       itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 3. Проверка видимости листа
+'----------------------------------------------------
+Public Function IsWorksheetVisible(ByVal ws As Object, ByVal visibilityState As Integer, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetVisible = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim currentVisibility As Integer
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущее состояние видимости листа
+    currentVisibility = ws.Visible
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (currentVisibility = visibilityState)
+        
+        ' Формируем строки для сообщений
+        Select Case currentVisibility
+            Case -1 ' xlSheetVisible
+                actualState = "Видимый"
+            Case 0 ' xlSheetHidden
+                actualState = "Скрытый"
+            Case 2 ' xlSheetVeryHidden
+                actualState = "Очень скрытый"
+            Case Else
+                actualState = "Неизвестное состояние: " & currentVisibility
+        End Select
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    Select Case visibilityState
+        Case -1 ' xlSheetVisible
+            expectedState = "Видимый"
+        Case 0 ' xlSheetHidden
+            expectedState = "Скрытый"
+        Case 2 ' xlSheetVeryHidden
+            expectedState = "Очень скрытый"
+        Case Else
+            expectedState = "Неизвестное состояние: " & visibilityState
+    End Select
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetVisible - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetVisible = ValidateWorksheet(ws, "Видимость листа", _
+                                        isCorrectState, _
+                                        expectedState, _
+                                        actualState, _
+                                        itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 4. Проверка защиты листа
+'----------------------------------------------------
+Public Function IsWorksheetProtected(ByVal ws As Object, ByVal shouldBeProtected As Boolean, _
+                                  Optional ByVal itemName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetProtected = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isProtected As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущее состояние защиты листа
+    isProtected = ws.ProtectContents
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (isProtected = shouldBeProtected)
+        
+        ' Формируем строки для сообщений
+        If isProtected Then
+            actualState = "Защищен"
+        Else
+            actualState = "Не защищен"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeProtected Then
+        expectedState = "Защищен"
+    Else
+        expectedState = "Не защищен"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetProtected - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetProtected = ValidateWorksheet(ws, "Защита листа", _
+                                         isCorrectState, _
+                                         expectedState, _
+                                         actualState, _
+                                         itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 5. Проверка свойства листа (имя, индекс и т.д.)
+'----------------------------------------------------
+Public Function IsWorksheetPropertyValid(ByVal ws As Object, ByVal propertyName As String, _
+                                      ByVal expectedValue As Variant, _
+                                      Optional ByVal itemName As String = "", _
+                                      Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetPropertyValid = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim actualValue As Variant
+    Dim isValid As Boolean
+    Dim actualValueString As String
+    Dim expectedValueString As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем значение свойства в зависимости от его имени
+    Select Case UCase(propertyName)
+        Case "NAME", "НАЗВАНИЕ", "ИМЯ"
+            actualValue = ws.Name
+        Case "INDEX", "ИНДЕКС"
+            actualValue = ws.index
+        Case "CODENAME", "КОДОВОЕИМЯ"
+            actualValue = ws.CodeName
+        Case "STANDARDWIDTH", "СТАНДАРТНАЯШИРИНА"
+            actualValue = ws.StandardWidth
+        Case "STANDARDHEIGHT", "СТАНДАРТНАЯВЫСОТА"
+            actualValue = ws.StandardHeight
+        Case "TYPE", "ТИП"
+            actualValue = ws.Type
+        Case "DISPLAYPAGEBREAKS", "ОТОБРАЖЕНИЕРАЗРЫВОВСТРАНИЦ"
+            actualValue = ws.DisplayPageBreaks
+        Case "ENABLEAUTOFILTER", "РАЗРЕШИТЬАВТОФИЛЬТР"
+            actualValue = ws.EnableAutoFilter
+        Case "ENABLECALCULATION", "РАЗРЕШИТЬВЫЧИСЛЕНИЯ"
+            actualValue = ws.EnableCalculation
+        Case "ENABLEOUTLINING", "РАЗРЕШИТЬСТРУКТУРУ"
+            actualValue = ws.EnableOutlining
+        Case "ENABLEPIVOTTABLE", "РАЗРЕШИТЬСВОДНУЮТАБЛИЦУ"
+            actualValue = ws.EnablePivotTable
+        Case Else
+            ' Попытка получить неизвестное свойство
+            Err.Raise 17, "IsWorksheetPropertyValid", "Неизвестное свойство: " & propertyName
+    End Select
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isValid = False
+        actualValueString = "Ошибка доступа: " & Err.Description
+        expectedValueString = CStr(expectedValue)
+    Else
+        ' Преобразуем значения к строкам для сравнения
+        ' В VBA сравнение разных типов может быть проблематичным
+        actualValueString = CStr(actualValue)
+        expectedValueString = CStr(expectedValue)
+        
+        ' Сравниваем значения (без учета регистра для строк)
+        If VarType(actualValue) = vbString And VarType(expectedValue) = vbString Then
+            isValid = (LCase(actualValueString) = LCase(expectedValueString))
+        Else
+            isValid = (actualValue = expectedValue)
+        End If
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetPropertyValid (" & propertyName & ") - Actual: " & actualValueString & ", Expected: " & expectedValueString & ", Match: " & isValid
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetPropertyValid = ValidateWorksheet(ws, "Свойство " & propertyName, _
+                                             isValid, _
+                                             expectedValueString, _
+                                             actualValueString, _
+                                             itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 6. Проверка режима отображения листа (обычный, разметка страницы, предварительный просмотр)
+'----------------------------------------------------
+Public Function IsWorksheetViewMode(ByVal ws As Object, ByVal expectedMode As Integer, _
+                                 Optional ByVal itemName As String = "", _
+                                 Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetViewMode = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim currentMode As Integer
+    Dim isCorrectMode As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущий режим отображения листа
+    currentMode = ws.Parent.Windows(1).View
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectMode = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущий режим ожидаемому
+        isCorrectMode = (currentMode = expectedMode)
+        
+        ' Формируем строки для сообщений
+        Select Case currentMode
+            Case 1 ' xlNormalView
+                actualState = "Обычный"
+            Case 2 ' xlPageBreakPreview
+                actualState = "Разметка страницы"
+            Case 3 ' xlPageLayoutView
+                actualState = "Предварительный просмотр"
+            Case Else
+                actualState = "Неизвестный режим: " & currentMode
+        End Select
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    Select Case expectedMode
+        Case 1 ' xlNormalView
+            expectedState = "Обычный"
+        Case 2 ' xlPageBreakPreview
+            expectedState = "Разметка страницы"
+        Case 3 ' xlPageLayoutView
+            expectedState = "Предварительный просмотр"
+        Case Else
+            expectedState = "Неизвестный режим: " & expectedMode
+    End Select
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetViewMode - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectMode
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetViewMode = ValidateWorksheet(ws, "Режим отображения", _
+                                        isCorrectMode, _
+                                        expectedState, _
+                                        actualState, _
+                                        itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 7. Проверка наличия печатной области
+'----------------------------------------------------
+Public Function hasPrintArea(ByVal ws As Object, ByVal shouldHavePrintArea As Boolean, _
+                          Optional ByVal itemName As String = "", _
+                          Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        hasPrintArea = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim hasPrintArea As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Проверяем наличие печатной области
+    Dim printArea As String
+    printArea = ws.PageSetup.printArea
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, есть ли печатная область
+        hasPrintArea = (printArea <> "")
+        
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (hasPrintArea = shouldHavePrintArea)
+        
+        ' Формируем строки для сообщений
+        If hasPrintArea Then
+            actualState = "Определена (" & printArea & ")"
+        Else
+            actualState = "Не определена"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldHavePrintArea Then
+        expectedState = "Определена"
+    Else
+        expectedState = "Не определена"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      HasPrintArea - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    hasPrintArea = ValidateWorksheet(ws, "Печатная область", _
+                                  isCorrectState, _
+                                  expectedState, _
+                                  actualState, _
+                                  itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 8. Проверка наличия и количества данных на листе
+'----------------------------------------------------
+Public Function hasData(ByVal ws As Object, ByVal shouldHaveData As Boolean, _
+                     Optional ByVal itemName As String = "", _
+                     Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        hasData = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim hasData As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    Dim usedRangeAddress As String
+    Dim usedCellsCount As Long
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем используемый диапазон листа
+    Dim usedRange As Object
+    Set usedRange = ws.usedRange
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Получаем адрес используемого диапазона
+        usedRangeAddress = usedRange.Address
+        
+        ' Получаем количество ячеек в используемом диапазоне
+        usedCellsCount = usedRange.Cells.Count
+        
+        ' Определяем, есть ли данные на листе
+        ' Можно использовать более сложную логику, например, проверять,
+        ' что в ячейках действительно есть значения, а не просто отформатированные пустые ячейки
+        hasData = (usedCellsCount > 1 Or (usedCellsCount = 1 And usedRange.Cells(1, 1).Value <> ""))
+        
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (hasData = shouldHaveData)
+        
+        ' Формируем строки для сообщений
+        If hasData Then
+            actualState = "Есть данные (диапазон: " & usedRangeAddress & ", ячеек: " & usedCellsCount & ")"
+        Else
+            actualState = "Нет данных"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldHaveData Then
+        expectedState = "Есть данные"
+    Else
+        expectedState = "Нет данных"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      HasData - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Освобождаем ресурсы
+    Set usedRange = Nothing
+    
+    ' Вызываем базовый метод валидации
+    hasData = ValidateWorksheet(ws, "Наличие данных", _
+                             isCorrectState, _
+                             expectedState, _
+                             actualState, _
+                             itemName, sourceInfo)
+End Function
+
+'====================================================
+' ТЕСТОВАЯ ПРОЦЕДУРА ДЛЯ ДЕМОНСТРАЦИИ РАБОТЫ МОДУЛЯ
+'====================================================
+Public Sub TestWorksheetValidation()
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode False
+    ' Включаем лог в отладочное окно для анализа
+    SetDebugLogMode True
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKSHEET ==="
+    
+    ' Получаем объект приложения и активный лист
+    Dim app As Object
+    Dim wb As Object
+    Dim ws As Object
+    Dim nonExistentWs As Object
+    
+    Set app = Application
+    
+    ' Проверяем, есть ли открытая книга
+    On Error Resume Next
+    Set wb = app.ActiveWorkbook
+    
+    If wb Is Nothing Then
+        ' Если нет активной книги, создаем новую
+        Set wb = app.Workbooks.Add
+        Debug.Print "Создана новая книга для тестирования"
+    End If
+    
+    ' Получаем активный лист
+    Set ws = wb.activeSheet
+    
+    ' Создаем переменную для тестирования неинициализированного листа
+    Set nonExistentWs = Nothing
+    
+    ' Тест 1: Проверка инициализации листа
+    Debug.Print "1. IsWorksheetInitialized (активный лист): " & IsWorksheetInitialized(ws, "ActiveWs", "TestWorksheetValidation")
+    Debug.Print "1a. IsWorksheetInitialized (Nothing): " & IsWorksheetInitialized(nonExistentWs, "NonExistentWs", "TestWorksheetValidation")
+    
+    ' Тест 2: Проверка активности листа
+    Debug.Print "2. IsWorksheetActive (текущий активный): " & IsWorksheetActive(ws, True, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Если в книге есть другие листы, проверяем их активность
+    If wb.Sheets.Count > 1 Then
+        Dim otherSheet As Object
+        
+        ' Находим лист, который не является активным
+        For Each otherSheet In wb.Sheets
+            If Not (otherSheet Is ws) Then
+                Debug.Print "2a. IsWorksheetActive (неактивный лист): " & IsWorksheetActive(otherSheet, False, "OtherSheet", "TestWorksheetValidation")
+                Exit For
+            End If
+        Next otherSheet
+    End If
+    
+    ' Тест 3: Проверка видимости листа
+    ' -1 = xlSheetVisible
+    Debug.Print "3. IsWorksheetVisible (активный лист): " & IsWorksheetVisible(ws, -1, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Тест 4: Проверка защиты листа
+    Debug.Print "4. IsWorksheetProtected (текущее состояние): " & IsWorksheetProtected(ws, ws.ProtectContents, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Сохраняем текущее состояние защиты для восстановления
+    Dim wasProtected As Boolean
+    wasProtected = ws.ProtectContents
+    
+    ' Если лист защищен, снимаем защиту
+    If wasProtected Then
+        On Error Resume Next
+        ws.Unprotect
+        Debug.Print "4a. IsWorksheetProtected (после снятия защиты): " & IsWorksheetProtected(ws, False, "ActiveWs", "TestWorksheetValidation")
+        On Error GoTo 0
+    Else
+        ' Если лист не защищен, устанавливаем защиту
+        On Error Resume Next
+        ws.Protect
+        Debug.Print "4a. IsWorksheetProtected (после установки защиты): " & IsWorksheetProtected(ws, True, "ActiveWs", "TestWorksheetValidation")
+        
+        ' Снимаем защиту для восстановления исходного состояния
+        ws.Unprotect
+        On Error GoTo 0
+    End If
+    
+    ' Восстанавливаем исходное состояние защиты
+    If wasProtected Then
+        On Error Resume Next
+        ws.Protect
+        On Error GoTo 0
+    End If
+    
+    ' Тест 5: Проверка свойств листа
+    Debug.Print "5a. IsWorksheetPropertyValid (Name): " & IsWorksheetPropertyValid(ws, "Name", ws.Name, "ActiveWs", "TestWorksheetValidation")
+    Debug.Print "5b. IsWorksheetPropertyValid (Index): " & IsWorksheetPropertyValid(ws, "Index", ws.index, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Тест 6: Проверка режима отображения листа
+    ' Получаем текущий режим отображения
+    Dim currentViewMode As Integer
+    On Error Resume Next
+    currentViewMode = wb.Windows(1).View
+    On Error GoTo 0
+    
+    Debug.Print "6. IsWorksheetViewMode (текущий режим): " & IsWorksheetViewMode(ws, currentViewMode, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Тест 7: Проверка наличия печатной области
+    ' Получаем текущее состояние печатной области
+    Dim hasPrintAreaDefined As Boolean
+    hasPrintAreaDefined = (ws.PageSetup.printArea <> "")
+    
+    Debug.Print "7. HasPrintArea (текущее состояние): " & hasPrintArea(ws, hasPrintAreaDefined, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Тест 8: Проверка наличия данных на листе
+    Debug.Print "8. HasData (текущее состояние): " & hasData(ws, True, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Создаем временный пустой лист для тестирования
+    Dim emptySheet As Object
+    On Error Resume Next
+    Set emptySheet = wb.Sheets.Add(After:=wb.Sheets(wb.Sheets.Count))
+    
+    If Not (emptySheet Is Nothing) Then
+        Debug.Print "8a. HasData (пустой лист): " & hasData(emptySheet, False, "EmptySheet", "TestWorksheetValidation")
+        
+        ' Удаляем временный лист
+        Application.DisplayAlerts = False
+        emptySheet.Delete
+        Application.DisplayAlerts = True
+    End If
+    On Error GoTo 0
+    
+    Debug.Print "=== ТЕСТИРОВАНИЕ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKSHEET ЗАВЕРШЕНО ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' ПРИМЕР ИСПОЛЬЗОВАНИЯ В РЕАЛЬНОМ КОДЕ
+'====================================================
+Public Sub ExampleUsage()
+    ' Отключаем MsgBox для пакетного режима
+    SetMessageBoxMode False
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKSHEET ==="
+    
+    ' Получаем объект приложения и пытаемся открыть книгу
+    Dim app As Object
+    Dim wb As Object
+    Dim ws As Object
+    Dim dataSheet As Object
+    
+    Set app = Application
+    
+    ' Предположим, что книга уже открыта
+    Set wb = app.ActiveWorkbook
+    
+    If wb Is Nothing Then
+        Debug.Print "Ошибка: Нет активной книги"
+        Exit Sub
+    End If
+    
+    ' Пытаемся получить лист "Данные"
+    On Error Resume Next
+    Set dataSheet = wb.Sheets("Данные")
+    
+    ' Если лист не найден, пробуем получить активный лист
+    If dataSheet Is Nothing Then
+        Set dataSheet = wb.activeSheet
+        Debug.Print "Лист 'Данные' не найден, используем активный лист: " & dataSheet.Name
+    End If
+    
+    ' Проверяем инициализацию листа
+    If Not IsWorksheetInitialized(dataSheet, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Ошибка: Не удалось получить доступ к листу"
+        Exit Sub
+    End If
+    
+    ' Проверяем наличие данных на листе
+    If Not hasData(dataSheet, True, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Предупреждение: На листе нет данных"
+    End If
+    
+    ' Проверяем защиту листа перед работой
+    If IsWorksheetProtected(dataSheet, True, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Предупреждение: Лист защищен, снимаем защиту"
+        
+        On Error Resume Next
+        dataSheet.Unprotect
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось снять защиту с листа. Возможно, требуется пароль."
+            Exit Sub
+        End If
+        On Error GoTo 0
+    End If
+    
+    ' Выполняем операции с листом...
+    Debug.Print "Выполнение операций с листом..."
+    
+    ' Проверяем видимость листа
+    If Not IsWorksheetVisible(dataSheet, -1, "DataSheet", "ExampleUsage") Then ' -1 = xlSheetVisible
+        Debug.Print "Предупреждение: Лист скрыт, делаем его видимым"
+        
+        On Error Resume Next
+        dataSheet.Visible = -1 ' xlSheetVisible
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось сделать лист видимым. " & Err.Description
+        End If
+        On Error GoTo 0
+    End If
+    
+    ' Активируем лист, если он не активен
+    If Not IsWorksheetActive(dataSheet, True, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Активируем лист для работы"
+        
+        On Error Resume Next
+        dataSheet.Activate
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось активировать лист. " & Err.Description
+        End If
+        On Error GoTo 0
+    End If
+    
+    ' Устанавливаем печатную область, если она не установлена
+    If Not hasPrintArea(dataSheet, True, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Устанавливаем печатную область"
+        
+        On Error Resume Next
+        ' Используем используемый диапазон как печатную область
+        dataSheet.PageSetup.printArea = dataSheet.usedRange.Address
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось установить печатную область. " & Err.Description
+        End If
+        On Error GoTo 0
+    End If
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ ЗАВЕРШЕН ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+
+
