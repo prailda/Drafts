@@ -1,0 +1,1437 @@
+﻿Option Explicit
+
+'====================================================
+' Модуль валидации для объектов FileSystemObject (FSO)
+' Предназначен для проверки путей, файлов и папок
+'====================================================
+
+'====================================================
+' Глобальные константы и переменные
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Константы для работы с путями
+Private Const MAX_PATH_LENGTH_WINDOWS As Long = 260      ' Максимальная длина пути в Windows
+Private Const FORBIDDEN_CHARS_WINDOWS As String = "*?<>|""" ' Запрещенные символы в Windows (без ":" для поддержки путей)
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+' Объект FileSystemObject
+Private m_FSO As Object
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+    
+    ' Инициализация объекта FSO
+    InitializeFSO
+End Sub
+
+'====================================================
+' Завершение работы модуля - освобождение ресурсов
+'====================================================
+Private Sub Class_Terminate()
+    ' Освобождаем ресурсы
+    Set m_FSO = Nothing
+End Sub
+
+'====================================================
+' Инициализация объекта FileSystemObject
+'====================================================
+Private Function InitializeFSO() As Boolean
+    On Error Resume Next
+    
+    ' Создаем объект FileSystemObject, если он еще не создан
+    If m_FSO Is Nothing Then
+        Set m_FSO = CreateObject("Scripting.FileSystemObject")
+    End If
+    
+    ' Проверяем успешность создания
+    If Err.Number <> 0 Then
+        HandleValidationError "Не удалось инициализировать FileSystemObject", _
+                           "Ошибка #" & Err.Number & ": " & Err.Description, _
+                           "m_FSO", "InitializeFSO"
+        InitializeFSO = False
+        Err.Clear
+    Else
+        InitializeFSO = True
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'====================================================
+' ТЕСТОВАЯ ПРОЦЕДУРА ДЛЯ ДЕМОНСТРАЦИИ РАБОТЫ МОДУЛЯ
+'====================================================
+Public Sub TestFSOValidation()
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode False
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ FSO ==="
+    
+    ' Получаем временную директорию для тестирования
+    ' (используем Environ("TEMP") вместо CurDir для гарантированного доступа)
+    Dim tempRootDir As String
+    Dim tempDir As String
+    Dim tempFile As String
+    Dim currentDir As String
+    
+    On Error Resume Next
+    tempRootDir = Environ("TEMP")
+    If tempRootDir = "" Then tempRootDir = "C:\Temp"
+    currentDir = CurDir()
+    
+    ' Создаем уникальные имена для тестирования
+    Dim uniqueID As String
+    uniqueID = Format(Now, "yyyymmddhhnnss") & "_" & Int(Rnd() * 10000)
+    tempDir = tempRootDir & "\FSO_Test_" & uniqueID
+    tempFile = tempDir & "\test_file.txt"
+    
+    Debug.Print "Тестовая директория: " & tempDir
+    
+    ' Создаем временную директорию и файл для тестирования
+    If m_FSO.FolderExists(tempDir) Then m_FSO.DeleteFolder tempDir, True
+    m_FSO.CreateFolder tempDir
+    
+    If Err.Number <> 0 Then
+        Debug.Print "Ошибка при создании тестовой директории: " & Err.Description
+        Err.Clear
+        ' Пытаемся создать в другом месте, если не удалось
+        tempDir = currentDir & "\FSO_Test_" & uniqueID
+        tempFile = tempDir & "\test_file.txt"
+        Debug.Print "Пытаемся создать в текущей директории: " & tempDir
+        
+        If m_FSO.FolderExists(tempDir) Then m_FSO.DeleteFolder tempDir, True
+        m_FSO.CreateFolder tempDir
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка при создании тестовой директории в текущей директории: " & Err.Description
+            Err.Clear
+            ' Если и здесь не удалось, используем пути без создания для тестирования
+            tempDir = tempRootDir ' Используем существующую директорию
+            tempFile = tempDir & "\test_file.txt"
+            Debug.Print "Используем существующую директорию: " & tempDir
+        End If
+    End If
+    
+    ' Создаем тестовый файл, если директория создана успешно
+    If m_FSO.FolderExists(tempDir) Then
+        Dim fileStream As Object
+        Set fileStream = m_FSO.CreateTextFile(tempFile, True)
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка при создании тестового файла: " & Err.Description
+            Err.Clear
+        Else
+            fileStream.WriteLine "Тестовое содержимое файла для проверки функциональности модуля валидации FSO."
+            fileStream.Close
+            Debug.Print "Тестовый файл успешно создан: " & tempFile
+        End If
+        
+        Set fileStream = Nothing
+    End If
+    
+    On Error GoTo 0
+    
+    '----------------------------------------------------
+    ' 1. Тесты валидации путей
+    '----------------------------------------------------
+    Debug.Print vbNewLine & "--- ТЕСТЫ ВАЛИДАЦИИ ПУТЕЙ ---"
+    
+    ' 1.1 Проверка на пустой путь
+    Debug.Print "IsPathNotEmpty(''):", IsPathNotEmpty("", "emptyPath", "TestFSOValidation")
+    Debug.Print "IsPathNotEmpty('" & tempDir & "'):", IsPathNotEmpty(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 1.2 Проверка на запрещенные символы
+    Debug.Print "IsPathWithoutForbiddenChars('C:\valid\path'):", IsPathWithoutForbiddenChars("C:\valid\path", "validPath", "TestFSOValidation")
+    Debug.Print "IsPathWithoutForbiddenChars('C:\invalid*\path'):", IsPathWithoutForbiddenChars("C:\invalid*\path", "invalidPath", "TestFSOValidation")
+    
+    ' 1.3 Проверка на длину пути
+    Dim longPath As String
+    longPath = String(MAX_PATH_LENGTH_WINDOWS + 10, "A")
+    Debug.Print "IsPathLengthValid('" & tempDir & "'):", IsPathLengthValid(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "IsPathLengthValid(длинный путь):", IsPathLengthValid(longPath, "longPath", "TestFSOValidation")
+    
+    ' 1.4 Проверка существования пути
+    Debug.Print "DoesPathExist('" & tempDir & "'):", DoesPathExist(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "DoesPathExist('C:\несуществующий\путь'):", DoesPathExist("C:\несуществующий\путь", "nonExistentPath", "TestFSOValidation")
+    
+    ' 1.5 Проверка абсолютного пути
+    Debug.Print "IsPathAbsolute('C:\Windows'):", IsPathAbsolute("C:\Windows", "absolutePath", "TestFSOValidation")
+    Debug.Print "IsPathAbsolute('.\relative\path'):", IsPathAbsolute(".\relative\path", "relativePath", "TestFSOValidation")
+    
+    ' 1.6 Проверка доступности пути
+    Debug.Print "IsPathAccessible('" & tempDir & "'):", IsPathAccessible(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 1.7 Комплексная проверка пути
+    Debug.Print "IsPathValid('" & tempDir & "', True, True):", IsPathValid(tempDir, True, True, "tempDir", "TestFSOValidation")
+    
+    '----------------------------------------------------
+    ' 2. Тесты валидации папок
+    '----------------------------------------------------
+    Debug.Print vbNewLine & "--- ТЕСТЫ ВАЛИДАЦИИ ПАПОК ---"
+    
+    ' 2.1 Проверка существования папки
+    Debug.Print "DoesFolderExist('" & tempDir & "'):", DoesFolderExist(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "DoesFolderExist('C:\несуществующая\папка'):", DoesFolderExist("C:\несуществующая\папка", "nonExistentFolder", "TestFSOValidation")
+    
+    ' 2.2 Проверка, что путь ведет к папке
+    Debug.Print "IsPathFolder('" & tempDir & "'):", IsPathFolder(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "IsPathFolder('" & tempFile & "'):", IsPathFolder(tempFile, "tempFile", "TestFSOValidation")
+    
+    ' 2.3 Проверка прав доступа к папке
+    Debug.Print "IsFolderWritable('" & tempDir & "'):", IsFolderWritable(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 2.4 Проверка атрибутов папки
+    Debug.Print "IsFolderHidden('" & tempDir & "'):", IsFolderHidden(tempDir, "tempDir", "TestFSOValidation")
+    Debug.Print "IsFolderSystem('" & tempDir & "'):", IsFolderSystem(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 2.5 Проверка, пуста ли папка
+    Debug.Print "IsFolderEmpty('" & tempDir & "'):", IsFolderEmpty(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 2.6 Комплексная проверка папки
+    Debug.Print "IsFolderValid('" & tempDir & "', True, True, True):", _
+            IsFolderValid(tempDir, True, True, True, "tempDir", "TestFSOValidation")
+    
+    '----------------------------------------------------
+    ' 3. Тесты валидации файлов
+    '----------------------------------------------------
+    Debug.Print vbNewLine & "--- ТЕСТЫ ВАЛИДАЦИИ ФАЙЛОВ ---"
+    
+    ' 3.1 Проверка существования файла
+    Debug.Print "DoesFileExist('" & tempFile & "'):", DoesFileExist(tempFile, "tempFile", "TestFSOValidation")
+    Debug.Print "DoesFileExist('C:\несуществующий.файл'):", DoesFileExist("C:\несуществующий.файл", "nonExistentFile", "TestFSOValidation")
+    
+    ' 3.2 Проверка, что путь ведет к файлу
+    Debug.Print "IsPathFile('" & tempFile & "'):", IsPathFile(tempFile, "tempFile", "TestFSOValidation")
+    Debug.Print "IsPathFile('" & tempDir & "'):", IsPathFile(tempDir, "tempDir", "TestFSOValidation")
+    
+    ' 3.3 Проверка расширения файла
+    Debug.Print "HasFileExtension('" & tempFile & "', 'txt'):", HasFileExtension(tempFile, "txt", "tempFile", "TestFSOValidation")
+    Debug.Print "HasFileExtension('" & tempFile & "', 'doc'):", HasFileExtension(tempFile, "doc", "tempFile", "TestFSOValidation")
+    
+    ' 3.4 Проверка прав доступа к файлу
+    Debug.Print "IsFileReadable('" & tempFile & "'):", IsFileReadable(tempFile, "tempFile", "TestFSOValidation")
+    Debug.Print "IsFileWritable('" & tempFile & "'):", IsFileWritable(tempFile, "tempFile", "TestFSOValidation")
+    
+    ' 3.5 Проверка атрибутов файла
+    Debug.Print "IsFileReadOnly('" & tempFile & "'):", IsFileReadOnly(tempFile, "tempFile", "TestFSOValidation")
+    Debug.Print "IsFileHidden('" & tempFile & "'):", IsFileHidden(tempFile, "tempFile", "TestFSOValidation")
+    
+    ' 3.6 Проверка размера файла
+    Debug.Print "IsFileSizeValid('" & tempFile & "', 1000):", IsFileSizeValid(tempFile, 1000, "tempFile", "TestFSOValidation")
+    Debug.Print "IsFileSizeValid('" & tempFile & "', 10):", IsFileSizeValid(tempFile, 10, "tempFile", "TestFSOValidation")
+    
+    ' 3.7 Проверка блокировки файла
+    Debug.Print "IsFileLocked('" & tempFile & "'):", IsFileLocked(tempFile, "tempFile", "TestFSOValidation")
+    
+    ' 3.8 Комплексная проверка файла
+    Debug.Print "IsFileValid('" & tempFile & "', True, 'txt', True, True):", _
+            IsFileValid(tempFile, True, "txt", True, True, 1000, "tempFile", "TestFSOValidation")
+    
+    '----------------------------------------------------
+    ' 4. Тесты дополнительных проверок
+    '----------------------------------------------------
+    Debug.Print vbNewLine & "--- ТЕСТЫ ДОПОЛНИТЕЛЬНЫХ ПРОВЕРОК ---"
+    
+    ' 4.1 Проверка доступности диска
+    Dim systemDrive As String
+    systemDrive = Left(currentDir, 1)
+    Debug.Print "IsDriveAvailable('" & systemDrive & "'):", IsDriveAvailable(systemDrive, "systemDrive", "TestFSOValidation")
+    Debug.Print "IsDriveAvailable('Z'):", IsDriveAvailable("Z", "nonExistentDrive", "TestFSOValidation")
+    
+    ' 4.2 Получение свободного места на диске
+    Dim freeSpace As Double
+    freeSpace = GetDriveFreeSpace(systemDrive, "systemDrive", "TestFSOValidation")
+    Debug.Print "GetDriveFreeSpace('" & systemDrive & "'): " & Format(freeSpace, "#,##0") & " байт"
+    
+    ' 4.3 Проверка наличия достаточного свободного места
+    Debug.Print "HasDriveSufficientSpace('" & systemDrive & "', 1000000):", _
+            HasDriveSufficientSpace(systemDrive, 1000000, "systemDrive", "TestFSOValidation")
+    
+    ' Удаляем временные файлы и папки
+    On Error Resume Next
+    If m_FSO.FileExists(tempFile) Then m_FSO.DeleteFile tempFile, True
+    If m_FSO.FolderExists(tempDir) Then m_FSO.DeleteFolder tempDir, True
+    On Error GoTo 0
+    
+    Debug.Print vbNewLine & "=== ТЕСТИРОВАНИЕ МОДУЛЯ ВАЛИДАЦИИ FSO ЗАВЕРШЕНО ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' ПРИМЕР ИСПОЛЬЗОВАНИЯ В РЕАЛЬНОМ КОДЕ
+'====================================================
+Public Sub ExampleUsageFSO()
+    ' Отключаем MsgBox для пакетного режима
+    SetMessageBoxMode False
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ FSO ==="
+    
+    ' Пример создания файла отчета
+    Dim reportPath As String
+    Dim reportDir As String
+    Dim reportFile As String
+    Dim systemDrive As String
+    
+    ' Получаем временную директорию и букву системного диска
+    reportDir = Environ("TEMP")
+    If reportDir = "" Then reportDir = "C:\Temp"
+    reportDir = reportDir & "\Reports"
+    
+    reportFile = "report_" & Format(Now, "yyyymmdd") & ".txt"
+    reportPath = reportDir & "\" & reportFile
+    systemDrive = Left(reportDir, 1)
+    
+    Debug.Print "Используем директорию для отчетов: " & reportDir
+    
+    ' 1. Проверяем наличие свободного места на диске
+    If Not HasDriveSufficientSpace(systemDrive, 1000000#, "systemDrive", "ExampleUsageFSO") Then
+        Debug.Print "Ошибка: Недостаточно места на диске для создания отчета"
+        Exit Sub
+    End If
+    
+    ' 2. Проверяем существование и доступность директории для отчетов
+    If Not DoesFolderExist(reportDir, "reportDir", "ExampleUsageFSO") Then
+        ' Папка не существует, пробуем создать
+        On Error Resume Next
+        m_FSO.CreateFolder reportDir
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось создать директорию для отчетов"
+            Exit Sub
+        End If
+        On Error GoTo 0
+    End If
+    
+    ' 3. Проверяем права на запись в директорию
+    If Not IsFolderWritable(reportDir, "reportDir", "ExampleUsageFSO") Then
+        Debug.Print "Ошибка: Нет прав на запись в директорию отчетов"
+        Exit Sub
+    End If
+    
+    ' 4. Проверяем, не существует ли уже файл с таким именем
+    If DoesFileExist(reportPath, "reportPath", "ExampleUsageFSO") Then
+        ' Файл уже существует, проверяем возможность перезаписи
+        If IsFileReadOnly(reportPath, "reportPath", "ExampleUsageFSO") Then
+            Debug.Print "Ошибка: Файл отчета уже существует и защищен от записи"
+            Exit Sub
+        End If
+        
+        If IsFileLocked(reportPath, "reportPath", "ExampleUsageFSO") Then
+            Debug.Print "Ошибка: Файл отчета заблокирован другим процессом"
+            Exit Sub
+        End If
+    End If
+    
+    ' 5. Создаем файл отчета
+    Dim fileStream As Object
+    On Error Resume Next
+    Set fileStream = m_FSO.CreateTextFile(reportPath, True)
+    
+    If Err.Number <> 0 Then
+        Debug.Print "Ошибка при создании файла отчета: " & Err.Description
+        Exit Sub
+    End If
+    
+    ' 6. Записываем данные в отчет
+    fileStream.WriteLine "===== ОТЧЕТ ОТ " & Format(Now, "dd.mm.yyyy hh:nn:ss") & " ====="
+    fileStream.WriteLine "Пример использования модуля валидации FSO."
+    fileStream.WriteLine "Этот файл был создан после успешного прохождения всех проверок."
+    fileStream.Close
+    Set fileStream = Nothing
+    
+    Debug.Print "Успех: Файл отчета успешно создан: " & reportPath
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ ЗАВЕРШЕН ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Получение объекта FSO для внешнего использования
+'====================================================
+Public Function GetFSO() As Object
+    If m_FSO Is Nothing Then
+        InitializeFSO
+    End If
+    
+    Set GetFSO = m_FSO
+End Function
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedValue As String, ByVal actualValue As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Ошибка валидации FSO! Ожидается [" & expectedValue & "], а получено [" & actualValue & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If itemName <> "" Then
+        msg = msg & vbNewLine & "Элемент: " & itemName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации FSO"
+    End If
+End Sub
+
+'====================================================
+' ВАЛИДАЦИЯ ПУТЕЙ (Path)
+'====================================================
+
+'----------------------------------------------------
+' Проверка, что строка не пустая
+'----------------------------------------------------
+Public Function IsPathNotEmpty(ByVal path As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    IsPathNotEmpty = (Trim(path) <> "")
+    
+    If Not IsPathNotEmpty Then
+        HandleValidationError "Непустой путь", "Пустая строка", itemName, sourceInfo
+    End If
+End Function
+
+'----------------------------------------------------
+' Проверка на запрещенные символы в пути (Windows)
+'----------------------------------------------------
+Public Function IsPathWithoutForbiddenChars(ByVal path As String, _
+                                         Optional ByVal itemName As String = "", _
+                                         Optional ByVal sourceInfo As String = "") As Boolean
+    Dim i As Integer
+    Dim char As String
+    
+    ' Проверяем каждый символ в строке пути
+    For i = 1 To Len(FORBIDDEN_CHARS_WINDOWS)
+        char = Mid(FORBIDDEN_CHARS_WINDOWS, i, 1)
+        
+        ' Если найден запрещенный символ
+        If InStr(1, path, char) > 0 Then
+            IsPathWithoutForbiddenChars = False
+            HandleValidationError "Путь без запрещенных символов", _
+                               "Содержит запрещенный символ '" & char & "'", _
+                               itemName, sourceInfo
+            Exit Function
+        End If
+    Next i
+    
+    IsPathWithoutForbiddenChars = True
+End Function
+
+'----------------------------------------------------
+' Проверка на превышение максимальной длины пути (Windows)
+'----------------------------------------------------
+Public Function IsPathLengthValid(ByVal path As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    IsPathLengthValid = (Len(path) <= MAX_PATH_LENGTH_WINDOWS)
+    
+    If Not IsPathLengthValid Then
+        HandleValidationError "Длина пути <= " & MAX_PATH_LENGTH_WINDOWS & " символов", _
+                           "Длина " & Len(path) & " символов", _
+                           itemName, sourceInfo
+    End If
+End Function
+
+'----------------------------------------------------
+' Проверка существования пути (может быть файл или папка)
+'----------------------------------------------------
+Public Function DoesPathExist(ByVal path As String, _
+                           Optional ByVal itemName As String = "", _
+                           Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            DoesPathExist = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    ' Проверяем существование файла или папки
+    DoesPathExist = m_FSO.FileExists(path) Or m_FSO.FolderExists(path)
+    
+    If Err.Number <> 0 Then
+        DoesPathExist = False
+        HandleValidationError "Существующий путь", _
+                          "Ошибка при проверке: " & Err.Description, _
+                          itemName, sourceInfo
+        Err.Clear
+    ElseIf Not DoesPathExist Then
+        HandleValidationError "Существующий путь", "Путь не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, является ли путь абсолютным
+'----------------------------------------------------
+Public Function IsPathAbsolute(ByVal path As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            IsPathAbsolute = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Используем FSO для определения абсолютного пути
+    Dim absolutePath As String
+    absolutePath = m_FSO.GetAbsolutePathName(path)
+    
+    ' Если путь начинается с буквы диска или с двух обратных слешей, он абсолютный
+    IsPathAbsolute = (Mid(path, 2, 1) = ":" Or Left(path, 2) = "\\")
+    
+    If Err.Number <> 0 Then
+        IsPathAbsolute = False
+        HandleValidationError "Абсолютный путь", _
+                          "Ошибка при проверке: " & Err.Description, _
+                          itemName, sourceInfo
+        Err.Clear
+    ElseIf Not IsPathAbsolute Then
+        HandleValidationError "Абсолютный путь", "Относительный путь", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка доступности пути (доступ на чтение)
+'----------------------------------------------------
+Public Function IsPathAccessible(ByVal path As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем существование пути
+    If Not DoesPathExist(path, itemName, sourceInfo) Then
+        IsPathAccessible = False
+        Exit Function
+    End If
+    
+    ' Проверяем доступность для чтения
+    On Error Resume Next
+    
+    If m_FSO.FileExists(path) Then
+        ' Для файла пробуем открыть на чтение
+        Dim fileStream As Object
+        Set fileStream = m_FSO.OpenTextFile(path, 1, False) ' 1 = ForReading
+        
+        If Err.Number = 0 Then
+            fileStream.Close
+            IsPathAccessible = True
+        Else
+            IsPathAccessible = False
+            HandleValidationError "Доступный путь", _
+                              "Нет доступа на чтение: " & Err.Description, _
+                              itemName, sourceInfo
+        End If
+        
+        Set fileStream = Nothing
+    ElseIf m_FSO.FolderExists(path) Then
+        ' Для папки пробуем получить файлы
+        Dim folder As Object
+        Set folder = m_FSO.GetFolder(path)
+        
+        If Err.Number = 0 Then
+            IsPathAccessible = True
+        Else
+            IsPathAccessible = False
+            HandleValidationError "Доступный путь", _
+                              "Нет доступа: " & Err.Description, _
+                              itemName, sourceInfo
+        End If
+        
+        Set folder = Nothing
+    End If
+    
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Комплексная проверка пути
+'----------------------------------------------------
+Public Function IsPathValid(ByVal path As String, ByVal mustExist As Boolean, _
+                         Optional ByVal mustBeAbsolute As Boolean = False, _
+                         Optional ByVal itemName As String = "", _
+                         Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем базовые требования к пути
+    If Not IsPathNotEmpty(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    If Not IsPathWithoutForbiddenChars(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    If Not IsPathLengthValid(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    ' Проверяем существование, если требуется
+    If mustExist And Not DoesPathExist(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    ' Проверяем на абсолютный путь, если требуется
+    If mustBeAbsolute And Not IsPathAbsolute(path, itemName, sourceInfo) Then
+        IsPathValid = False
+        Exit Function
+    End If
+    
+    IsPathValid = True
+End Function
+
+'====================================================
+' ВАЛИДАЦИЯ ПАПОК (Folder)
+'====================================================
+
+'----------------------------------------------------
+' Проверка существования папки
+'----------------------------------------------------
+Public Function DoesFolderExist(ByVal folderPath As String, _
+                             Optional ByVal itemName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            DoesFolderExist = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Проверяем, существует ли папка
+    DoesFolderExist = m_FSO.FolderExists(folderPath)
+    
+    If Err.Number <> 0 Then
+        DoesFolderExist = False
+        HandleValidationError "Существующая папка", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not DoesFolderExist Then
+        HandleValidationError "Существующая папка", "Папка не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, что путь ведет к папке, а не к файлу
+'----------------------------------------------------
+Public Function IsPathFolder(ByVal path As String, _
+                          Optional ByVal itemName As String = "", _
+                          Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            IsPathFolder = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Проверяем, существует ли путь
+    If Not DoesPathExist(path, itemName, sourceInfo) Then
+        IsPathFolder = False
+        Exit Function
+    End If
+    
+    ' Проверяем, что это папка, а не файл
+    IsPathFolder = m_FSO.FolderExists(path) And Not m_FSO.FileExists(path)
+    
+    If Err.Number <> 0 Then
+        IsPathFolder = False
+        HandleValidationError "Путь к папке", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not IsPathFolder Then
+        HandleValidationError "Путь к папке", "Путь ведет к файлу или не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка прав доступа к папке (чтение/запись)
+'----------------------------------------------------
+Public Function IsFolderWritable(ByVal folderPath As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование папки
+    If Not DoesFolderExist(folderPath, itemName, sourceInfo) Then
+        IsFolderWritable = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Создаем временный файл для проверки прав на запись
+    Dim tempFileName As String
+    Dim tempFilePath As String
+    Dim fileStream As Object
+    
+    ' Генерируем уникальное имя для временного файла
+    tempFileName = "temp_" & Format(Now, "yyyymmdd_hhnnss") & ".tmp"
+    tempFilePath = folderPath & IIf(Right(folderPath, 1) = "\" Or Right(folderPath, 1) = "/", "", "\") & tempFileName
+    
+    ' Пробуем создать файл
+    Set fileStream = m_FSO.CreateTextFile(tempFilePath, True)
+    
+    ' Проверяем результат
+    If Err.Number = 0 Then
+        ' Успешно создали файл, значит папка доступна для записи
+        fileStream.Close
+        
+        ' Удаляем временный файл
+        m_FSO.DeleteFile tempFilePath, True
+        
+        IsFolderWritable = True
+    Else
+        ' Не удалось создать файл, папка не доступна для записи
+        IsFolderWritable = False
+        HandleValidationError "Папка с правами на запись", _
+                           "Нет прав на запись: " & Err.Description, _
+                           itemName, sourceInfo
+    End If
+    
+    Set fileStream = Nothing
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка атрибутов папки (скрытая, системная)
+'----------------------------------------------------
+Public Function IsFolderHidden(ByVal folderPath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование папки
+    If Not DoesFolderExist(folderPath, itemName, sourceInfo) Then
+        IsFolderHidden = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект папки и проверяем ее атрибуты
+    Dim folder As Object
+    Set folder = m_FSO.GetFolder(folderPath)
+    
+    If Err.Number <> 0 Then
+        IsFolderHidden = False
+        HandleValidationError "Доступ к атрибутам папки", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, имеет ли папка атрибут "Скрытый"
+        ' Атрибут Hidden = 2
+        IsFolderHidden = ((folder.Attributes And 2) = 2)
+    End If
+    
+    Set folder = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, является ли папка системной
+'----------------------------------------------------
+Public Function IsFolderSystem(ByVal folderPath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование папки
+    If Not DoesFolderExist(folderPath, itemName, sourceInfo) Then
+        IsFolderSystem = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект папки и проверяем ее атрибуты
+    Dim folder As Object
+    Set folder = m_FSO.GetFolder(folderPath)
+    
+    If Err.Number <> 0 Then
+        IsFolderSystem = False
+        HandleValidationError "Доступ к атрибутам папки", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, имеет ли папка атрибут "Системный"
+        ' Атрибут System = 4
+        IsFolderSystem = ((folder.Attributes And 4) = 4)
+    End If
+    
+    Set folder = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, пуста ли папка
+'----------------------------------------------------
+Public Function IsFolderEmpty(ByVal folderPath As String, _
+                           Optional ByVal itemName As String = "", _
+                           Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование папки
+    If Not DoesFolderExist(folderPath, itemName, sourceInfo) Then
+        IsFolderEmpty = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект папки
+    Dim folder As Object
+    Set folder = m_FSO.GetFolder(folderPath)
+    
+    If Err.Number <> 0 Then
+        IsFolderEmpty = False
+        HandleValidationError "Доступ к содержимому папки", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, есть ли файлы или подпапки
+        IsFolderEmpty = (folder.Files.Count = 0 And folder.SubFolders.Count = 0)
+    End If
+    
+    Set folder = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Комплексная проверка папки
+'----------------------------------------------------
+Public Function IsFolderValid(ByVal folderPath As String, ByVal mustExist As Boolean, _
+                           Optional ByVal mustBeWritable As Boolean = False, _
+                           Optional ByVal mustNotBeHiddenOrSystem As Boolean = False, _
+                           Optional ByVal itemName As String = "", _
+                           Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем базовые требования к пути
+    If Not IsPathValid(folderPath, mustExist, False, itemName, sourceInfo) Then
+        IsFolderValid = False
+        Exit Function
+    End If
+    
+    ' Если папка должна существовать, выполняем дополнительные проверки
+    If mustExist Then
+        ' Проверяем, что путь ведет к папке, а не к файлу
+        If Not IsPathFolder(folderPath, itemName, sourceInfo) Then
+            IsFolderValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем права на запись, если требуется
+        If mustBeWritable And Not IsFolderWritable(folderPath, itemName, sourceInfo) Then
+            IsFolderValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем, что папка не скрытая и не системная, если требуется
+        If mustNotBeHiddenOrSystem Then
+            If IsFolderHidden(folderPath, itemName, sourceInfo) Then
+                HandleValidationError "Видимая папка", "Скрытая папка", itemName, sourceInfo
+                IsFolderValid = False
+                Exit Function
+            End If
+            
+            If IsFolderSystem(folderPath, itemName, sourceInfo) Then
+                HandleValidationError "Обычная папка", "Системная папка", itemName, sourceInfo
+                IsFolderValid = False
+                Exit Function
+            End If
+        End If
+    End If
+    
+    IsFolderValid = True
+End Function
+
+'====================================================
+' ВАЛИДАЦИЯ ФАЙЛОВ (File)
+'====================================================
+
+'----------------------------------------------------
+' Проверка существования файла
+'----------------------------------------------------
+Public Function DoesFileExist(ByVal filePath As String, _
+                           Optional ByVal itemName As String = "", _
+                           Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            DoesFileExist = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Проверяем, существует ли файл
+    DoesFileExist = m_FSO.FileExists(filePath)
+    
+    If Err.Number <> 0 Then
+        DoesFileExist = False
+        HandleValidationError "Существующий файл", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not DoesFileExist Then
+        HandleValidationError "Существующий файл", "Файл не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка, что путь ведет к файлу, а не к папке
+'----------------------------------------------------
+Public Function IsPathFile(ByVal path As String, _
+                        Optional ByVal itemName As String = "", _
+                        Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            IsPathFile = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Проверяем, существует ли путь
+    If Not DoesPathExist(path, itemName, sourceInfo) Then
+        IsPathFile = False
+        Exit Function
+    End If
+    
+    ' Проверяем, что это файл, а не папка
+    IsPathFile = m_FSO.FileExists(path) And Not m_FSO.FolderExists(path)
+    
+    If Err.Number <> 0 Then
+        IsPathFile = False
+        HandleValidationError "Путь к файлу", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not IsPathFile Then
+        HandleValidationError "Путь к файлу", "Путь ведет к папке или не существует", itemName, sourceInfo
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка расширения файла
+'----------------------------------------------------
+Public Function HasFileExtension(ByVal filePath As String, ByVal extension As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            HasFileExtension = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем расширение файла
+    Dim fileExtension As String
+    
+    ' Убираем точку из расширения, если она есть
+    If Left(extension, 1) = "." Then
+        extension = Mid(extension, 2)
+    End If
+    
+    ' Получаем расширение файла через FSO
+    fileExtension = m_FSO.GetExtensionName(filePath)
+    
+    If Err.Number <> 0 Then
+        HasFileExtension = False
+        HandleValidationError "Файл с расширением ." & extension, _
+                           "Ошибка при получении расширения: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Сравниваем расширения (без учета регистра)
+        HasFileExtension = (LCase(fileExtension) = LCase(extension))
+        
+        If Not HasFileExtension Then
+            HandleValidationError "Файл с расширением ." & extension, _
+                               "Файл имеет расширение ." & fileExtension, _
+                               itemName, sourceInfo
+        End If
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка прав доступа к файлу (чтение)
+'----------------------------------------------------
+Public Function IsFileReadable(ByVal filePath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileReadable = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Пробуем открыть файл для чтения
+    Dim fileStream As Object
+    Set fileStream = m_FSO.OpenTextFile(filePath, 1, False) ' 1 = ForReading
+    
+    ' Проверяем результат
+    If Err.Number = 0 Then
+        ' Успешно открыли файл, значит он доступен для чтения
+        fileStream.Close
+        IsFileReadable = True
+    Else
+        ' Не удалось открыть файл
+        IsFileReadable = False
+        HandleValidationError "Файл с правами на чтение", _
+                           "Нет прав на чтение: " & Err.Description, _
+                           itemName, sourceInfo
+    End If
+    
+    Set fileStream = Nothing
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка прав доступа к файлу (запись)
+'----------------------------------------------------
+Public Function IsFileWritable(ByVal filePath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверка существования файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileWritable = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Пробуем открыть файл для записи
+    Dim fileStream As Object
+    Set fileStream = m_FSO.OpenTextFile(filePath, 8, False) ' 8 = ForAppending
+    
+    ' Проверяем результат
+    If Err.Number = 0 Then
+        ' Успешно открыли файл для записи
+        fileStream.Close
+        IsFileWritable = True
+    Else
+        ' Не удалось открыть файл для записи
+        IsFileWritable = False
+        HandleValidationError "Файл с правами на запись", _
+                           "Нет прав на запись: " & Err.Description, _
+                           itemName, sourceInfo
+    End If
+    
+    Set fileStream = Nothing
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка атрибутов файла (только для чтения)
+'----------------------------------------------------
+'----------------------------------------------------
+' Проверка атрибутов файла (скрытый)
+'----------------------------------------------------
+Public Function IsFileHidden(ByVal filePath As String, _
+                          Optional ByVal itemName As String = "", _
+                          Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileHidden = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект файла и проверяем его атрибуты
+    Dim fileObj As Object
+    Set fileObj = m_FSO.GetFile(filePath)
+    
+    If Err.Number <> 0 Then
+        IsFileHidden = False
+        HandleValidationError "Доступ к атрибутам файла", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, имеет ли файл атрибут "Скрытый"
+        ' Атрибут Hidden = 2
+        IsFileHidden = ((fileObj.Attributes And 2) = 2)
+    End If
+    
+    Set fileObj = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка размера файла
+'----------------------------------------------------
+Public Function IsFileSizeValid(ByVal filePath As String, ByVal maxSizeBytes As Long, _
+                             Optional ByVal itemName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileSizeValid = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект файла и его размер
+    Dim fileObj As Object
+    Set fileObj = m_FSO.GetFile(filePath)
+    
+    If Err.Number <> 0 Then
+        IsFileSizeValid = False
+        HandleValidationError "Доступ к свойствам файла", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем размер файла
+        Dim fileSize As Long
+        fileSize = fileObj.Size
+        
+        IsFileSizeValid = (fileSize <= maxSizeBytes)
+        
+        If Not IsFileSizeValid Then
+            HandleValidationError "Размер файла <= " & maxSizeBytes & " байт", _
+                               "Размер файла = " & fileSize & " байт", _
+                               itemName, sourceInfo
+        End If
+    End If
+    
+    Set fileObj = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка на блокировку файла другим процессом
+'----------------------------------------------------
+Public Function IsFileLocked(ByVal filePath As String, _
+                          Optional ByVal itemName As String = "", _
+                          Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileLocked = True ' Считаем несуществующий файл блокированным
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Пробуем открыть файл в режиме эксклюзивного доступа
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    
+    Open filePath For Binary Access Read Write Lock Read Write As #fileNum
+    
+    ' Проверяем результат
+    If Err.Number <> 0 Then
+        ' Не удалось открыть файл, вероятно он заблокирован
+        IsFileLocked = True
+        ' Не вызываем HandleValidationError, так как это не ошибка валидации
+    Else
+        ' Успешно открыли файл
+        IsFileLocked = False
+        Close #fileNum
+    End If
+    
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Комплексная проверка файла
+'----------------------------------------------------
+Public Function IsFileValid(ByVal filePath As String, ByVal mustExist As Boolean, _
+                         Optional ByVal requiredExtension As String = "", _
+                         Optional ByVal mustBeReadable As Boolean = False, _
+                         Optional ByVal mustBeWritable As Boolean = False, _
+                         Optional ByVal maxSizeBytes As Long = -1, _
+                         Optional ByVal itemName As String = "", _
+                         Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем базовые требования к пути
+    If Not IsPathValid(filePath, mustExist, False, itemName, sourceInfo) Then
+        IsFileValid = False
+        Exit Function
+    End If
+    
+    ' Если файл должен существовать, выполняем дополнительные проверки
+    If mustExist Then
+        ' Проверяем, что путь ведет к файлу, а не к папке
+        If Not IsPathFile(filePath, itemName, sourceInfo) Then
+            IsFileValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем расширение, если задано
+        If requiredExtension <> "" Then
+            If Not HasFileExtension(filePath, requiredExtension, itemName, sourceInfo) Then
+                IsFileValid = False
+                Exit Function
+            End If
+        End If
+        
+        ' Проверяем права на чтение, если требуется
+        If mustBeReadable And Not IsFileReadable(filePath, itemName, sourceInfo) Then
+            IsFileValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем права на запись, если требуется
+        If mustBeWritable And Not IsFileWritable(filePath, itemName, sourceInfo) Then
+            IsFileValid = False
+            Exit Function
+        End If
+        
+        ' Проверяем размер файла, если задан максимальный размер
+        If maxSizeBytes > 0 Then
+            If Not IsFileSizeValid(filePath, maxSizeBytes, itemName, sourceInfo) Then
+                IsFileValid = False
+                Exit Function
+            End If
+        End If
+        
+        ' Проверяем блокировку файла
+        If IsFileLocked(filePath, itemName, sourceInfo) Then
+            HandleValidationError "Файл доступен", "Файл заблокирован другим процессом", itemName, sourceInfo
+            IsFileValid = False
+            Exit Function
+        End If
+    End If
+    
+    IsFileValid = True
+End Function
+
+'====================================================
+' ДОПОЛНИТЕЛЬНЫЕ ПРОВЕРКИ ДЛЯ FSO
+'====================================================
+
+'----------------------------------------------------
+' Проверка доступности диска
+'----------------------------------------------------
+Public Function IsDriveAvailable(ByVal driveLetter As String, _
+                              Optional ByVal itemName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем инициализацию FSO
+    If m_FSO Is Nothing Then
+        If Not InitializeFSO Then
+            IsDriveAvailable = False
+            Exit Function
+        End If
+    End If
+    
+    On Error Resume Next
+    
+    ' Нормализуем букву диска
+    driveLetter = Left(driveLetter, 1)
+    
+    ' Проверяем, существует ли диск
+    IsDriveAvailable = m_FSO.DriveExists(driveLetter)
+    
+    If Err.Number <> 0 Then
+        IsDriveAvailable = False
+        HandleValidationError "Доступный диск", _
+                           "Ошибка при проверке: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    ElseIf Not IsDriveAvailable Then
+        HandleValidationError "Доступный диск", "Диск " & driveLetter & ": не существует", itemName, sourceInfo
+    Else
+        ' Если диск существует, проверяем его готовность
+        Dim driveObj As Object
+        Set driveObj = m_FSO.GetDrive(driveLetter)
+        
+        If Err.Number <> 0 Then
+            IsDriveAvailable = False
+            HandleValidationError "Доступный диск", _
+                               "Ошибка при получении объекта диска: " & Err.Description, _
+                               itemName, sourceInfo
+            Err.Clear
+        Else
+            IsDriveAvailable = driveObj.IsReady
+            
+            If Not IsDriveAvailable Then
+                HandleValidationError "Готовый диск", "Диск " & driveLetter & ": не готов", itemName, sourceInfo
+            End If
+        End If
+        
+        Set driveObj = Nothing
+    End If
+    
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Получение свободного места на диске
+'----------------------------------------------------
+Public Function GetDriveFreeSpace(ByVal driveLetter As String, _
+                               Optional ByVal itemName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Double
+    ' Инициализация возвращаемого значения (-1 = ошибка)
+    GetDriveFreeSpace = -1
+    
+    ' Проверяем доступность диска
+    If Not IsDriveAvailable(driveLetter, itemName, sourceInfo) Then
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Нормализуем букву диска
+    driveLetter = Left(driveLetter, 1)
+    
+    ' Получаем объект диска и его свободное место
+    Dim driveObj As Object
+    Set driveObj = m_FSO.GetDrive(driveLetter)
+    
+    If Err.Number <> 0 Then
+        HandleValidationError "Доступ к свойствам диска", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Получаем свободное место в байтах
+        ' Используем Double для больших значений
+        GetDriveFreeSpace = CDbl(driveObj.freeSpace)
+        
+        If Err.Number <> 0 Then
+            GetDriveFreeSpace = -1
+            HandleValidationError "Доступ к свободному месту", _
+                               "Ошибка: " & Err.Description, _
+                               itemName, sourceInfo
+            Err.Clear
+        End If
+    End If
+    
+    Set driveObj = Nothing
+    On Error GoTo 0
+End Function
+
+'----------------------------------------------------
+' Проверка наличия достаточного свободного места на диске
+'----------------------------------------------------
+Public Function HasDriveSufficientSpace(ByVal driveLetter As String, ByVal requiredSpaceBytes As Double, _
+                                      Optional ByVal itemName As String = "", _
+                                      Optional ByVal sourceInfo As String = "") As Boolean
+    ' Получаем свободное место на диске
+    Dim freeSpace As Double
+    freeSpace = GetDriveFreeSpace(driveLetter, itemName, sourceInfo)
+    
+    ' Проверяем результат
+    If freeSpace = -1 Then
+        HasDriveSufficientSpace = False ' Ошибка при получении свободного места
+    Else
+        HasDriveSufficientSpace = (freeSpace >= requiredSpaceBytes)
+        
+        If Not HasDriveSufficientSpace Then
+            HandleValidationError "Свободное место >= " & Format(requiredSpaceBytes, "#,##0") & " байт", _
+                               "Доступно только " & Format(freeSpace, "#,##0") & " байт", _
+                               itemName, sourceInfo
+        End If
+    End If
+End Function
+
+'----------------------------------------------------
+' Проверка атрибутов файла (только для чтения)
+'----------------------------------------------------
+Public Function IsFileReadOnly(ByVal filePath As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Проверяем существование файла
+    If Not DoesFileExist(filePath, itemName, sourceInfo) Then
+        IsFileReadOnly = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Получаем объект файла и проверяем его атрибуты
+    Dim fileObj As Object
+    Set fileObj = m_FSO.GetFile(filePath)
+    
+    If Err.Number <> 0 Then
+        IsFileReadOnly = False
+        HandleValidationError "Доступ к атрибутам файла", _
+                           "Ошибка: " & Err.Description, _
+                           itemName, sourceInfo
+        Err.Clear
+    Else
+        ' Проверяем, имеет ли файл атрибут "Только для чтения"
+        ' Атрибут ReadOnly = 1
+        IsFileReadOnly = ((fileObj.Attributes And 1) = 1)
+    End If
+    
+    Set fileObj = Nothing
+    On Error GoTo 0
+End Function
+

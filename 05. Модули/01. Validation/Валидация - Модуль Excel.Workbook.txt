@@ -1,0 +1,701 @@
+﻿Option Explicit
+
+'====================================================
+' Модуль валидации для объекта Excel.Workbook
+' Предназначен для безопасной работы с книгами Excel
+'====================================================
+
+'====================================================
+' Глобальные константы и переменные
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+' Ссылка на модуль валидации Application (опционально)
+Private m_AppValidator As Object
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+    Set m_AppValidator = Nothing ' Будет инициализирован при необходимости
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Установка ссылки на модуль валидации Application (опционально)
+'====================================================
+Public Sub SetApplicationValidator(ByVal appValidator As Object)
+    Set m_AppValidator = appValidator
+End Sub
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedValue As String, ByVal actualValue As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Ошибка валидации Excel.Workbook! Ожидается [" & expectedValue & "], а получено [" & actualValue & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If itemName <> "" Then
+        msg = msg & vbNewLine & "Элемент: " & itemName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации Excel.Workbook"
+    End If
+End Sub
+
+'====================================================
+' БАЗОВЫЙ МЕТОД ВАЛИДАЦИИ
+' Этот метод используется всеми другими функциями валидации
+'====================================================
+Private Function ValidateWorkbook(ByVal wb As Object, ByVal checkType As String, _
+                               ByVal checkResult As Boolean, _
+                               Optional ByVal expectedValue As String = "", _
+                               Optional ByVal actualValue As String = "", _
+                               Optional ByVal itemName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Boolean
+    ' Выполняем проверку на основе переданного результата
+    ValidateWorkbook = checkResult
+    
+    ' Если проверка не прошла, вызываем обработчик ошибки
+    If Not ValidateWorkbook Then
+        HandleValidationError expectedValue, actualValue, itemName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' ФУНКЦИИ ВАЛИДАЦИИ EXCEL.WORKBOOK
+'====================================================
+
+'----------------------------------------------------
+' 1. Проверка инициализации книги
+'----------------------------------------------------
+Public Function IsWorkbookInitialized(ByVal wb As Object, _
+                                   Optional ByVal itemName As String = "", _
+                                   Optional ByVal sourceInfo As String = "") As Boolean
+    On Error Resume Next
+    
+    Dim isInitialized As Boolean
+    Dim actualState As String
+    
+    ' Проверяем инициализацию книги, пытаясь обратиться к её свойству
+    isInitialized = Not (wb Is Nothing)
+    
+    If isInitialized Then
+        ' Дополнительная проверка доступности API через обращение к свойству
+        Dim testValue As String
+        testValue = wb.Name
+        If Err.Number <> 0 Then
+            isInitialized = False
+            actualState = "Недоступен API книги (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+        Else
+            actualState = "Инициализирована"
+        End If
+    Else
+        actualState = "Не инициализирована (Nothing)"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookInitialized = ValidateWorkbook(wb, "Инициализация", _
+                                          isInitialized, _
+                                          "Инициализированная Excel.Workbook", _
+                                          actualState, _
+                                          itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 2. Проверка состояния книги (открыта/закрыта)
+'----------------------------------------------------
+Public Function IsWorkbookOpen(ByVal wb As Object, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        IsWorkbookOpen = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isOpen As Boolean
+    Dim actualState As String
+    
+    ' Проверяем, открыта ли книга, пытаясь получить её имя
+    Dim testName As String
+    testName = wb.Name
+    
+    isOpen = (Err.Number = 0)
+    
+    If isOpen Then
+        actualState = "Открыта"
+    Else
+        actualState = "Закрыта или недоступна (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorkbookOpen - Actual: " & actualState & ", Match: " & isOpen
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookOpen = ValidateWorkbook(wb, "Состояние книги", _
+                                   isOpen, _
+                                   "Открыта", _
+                                   actualState, _
+                                   itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 3. Проверка сохранённого состояния книги
+'----------------------------------------------------
+Public Function IsWorkbookSaved(ByVal wb As Object, ByVal shouldBeSaved As Boolean, _
+                             Optional ByVal itemName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        IsWorkbookSaved = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        IsWorkbookSaved = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isSaved As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Проверяем сохранённое состояние книги
+    ' в Excel свойство Saved = True означает, что нет несохраненных изменений
+    isSaved = wb.Saved
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (isSaved = shouldBeSaved)
+        
+        ' Формируем строки для сообщений
+        If isSaved Then
+            actualState = "Сохранена"
+        Else
+            actualState = "Не сохранена"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeSaved Then
+        expectedState = "Сохранена"
+    Else
+        expectedState = "Не сохранена"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorkbookSaved - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookSaved = ValidateWorkbook(wb, "Состояние сохранения", _
+                                    isCorrectState, _
+                                    expectedState, _
+                                    actualState, _
+                                    itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 4. Проверка состояния защиты книги
+'----------------------------------------------------
+Public Function IsWorkbookProtected(ByVal wb As Object, ByVal shouldBeProtected As Boolean, _
+                                 Optional ByVal itemName As String = "", _
+                                 Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        IsWorkbookProtected = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        IsWorkbookProtected = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isProtected As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Проверяем состояние защиты книги
+    isProtected = wb.ProtectStructure Or wb.ProtectWindows
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (isProtected = shouldBeProtected)
+        
+        ' Формируем строки для сообщений
+        If isProtected Then
+            actualState = "Защищена"
+        Else
+            actualState = "Не защищена"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeProtected Then
+        expectedState = "Защищена"
+    Else
+        expectedState = "Не защищена"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorkbookProtected - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookProtected = ValidateWorkbook(wb, "Состояние защиты", _
+                                        isCorrectState, _
+                                        expectedState, _
+                                        actualState, _
+                                        itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 5. Проверка свойства книги (имя, путь и т.д.)
+'----------------------------------------------------
+Public Function IsWorkbookPropertyValid(ByVal wb As Object, ByVal propertyName As String, _
+                                     ByVal expectedValue As Variant, _
+                                     Optional ByVal itemName As String = "", _
+                                     Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        IsWorkbookPropertyValid = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        IsWorkbookPropertyValid = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim actualValue As Variant
+    Dim isValid As Boolean
+    Dim actualValueString As String
+    Dim expectedValueString As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем значение свойства в зависимости от его имени
+    Select Case UCase(propertyName)
+        Case "NAME", "НАЗВАНИЕ"
+            actualValue = wb.Name
+        Case "PATH", "ПУТЬ"
+            actualValue = wb.path
+        Case "FULLNAME", "ПОЛНОЕ_ИМЯ", "ПОЛНОЕИМЯ"
+            actualValue = wb.FullName
+        Case "READONLY", "ТОЛЬКОЧТЕНИЕ"
+            actualValue = wb.ReadOnly
+        Case "HASSIGNATURE", "ПОДПИСЬ"
+            actualValue = wb.HasVBProject
+        Case "AUTHOR", "АВТОР"
+            actualValue = wb.Author
+        Case "HASVBPROJECT", "ИМЕЕТVBA"
+            actualValue = wb.HasVBProject
+        Case Else
+            ' Попытка получить пользовательское свойство через позднее связывание
+            ' Заглушка - в реальном коде нужно обрабатывать дополнительные свойства
+            Err.Raise 17, "IsWorkbookPropertyValid", "Неизвестное свойство: " & propertyName
+    End Select
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isValid = False
+        actualValueString = "Ошибка доступа: " & Err.Description
+        expectedValueString = CStr(expectedValue)
+    Else
+        ' Преобразуем значения к строкам для сравнения
+        ' В VBA сравнение разных типов может быть проблематичным
+        actualValueString = CStr(actualValue)
+        expectedValueString = CStr(expectedValue)
+        
+        ' Сравниваем значения (без учета регистра для строк)
+        If VarType(actualValue) = vbString And VarType(expectedValue) = vbString Then
+            isValid = (LCase(actualValueString) = LCase(expectedValueString))
+        Else
+            isValid = (actualValue = expectedValue)
+        End If
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorkbookPropertyValid (" & propertyName & ") - Actual: " & actualValueString & ", Expected: " & expectedValueString & ", Match: " & isValid
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorkbookPropertyValid = ValidateWorkbook(wb, "Свойство " & propertyName, _
+                                            isValid, _
+                                            expectedValueString, _
+                                            actualValueString, _
+                                            itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 6. Проверка доступности листов в книге
+'----------------------------------------------------
+Public Function AreSheetsAccessible(ByVal wb As Object, _
+                                 Optional ByVal itemName As String = "", _
+                                 Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        AreSheetsAccessible = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        AreSheetsAccessible = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim sheetsCount As Long
+    Dim isAccessible As Boolean
+    Dim actualState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Пытаемся получить количество листов в книге
+    sheetsCount = wb.Sheets.Count
+    
+    ' Проверка на случай ошибки доступа к коллекции
+    If Err.Number <> 0 Then
+        isAccessible = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        isAccessible = True
+        actualState = "Доступны, количество: " & sheetsCount
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      AreSheetsAccessible - Actual: " & actualState & ", Match: " & isAccessible
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    AreSheetsAccessible = ValidateWorkbook(wb, "Доступность листов", _
+                                        isAccessible, _
+                                        "Доступны", _
+                                        actualState, _
+                                        itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 7. Проверка наличия листа с указанным именем
+'----------------------------------------------------
+Public Function DoesSheetExist(ByVal wb As Object, ByVal sheetName As String, _
+                            Optional ByVal itemName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирована и открыта ли книга
+    If Not IsWorkbookInitialized(wb, itemName, sourceInfo) Then
+        DoesSheetExist = False
+        Exit Function
+    End If
+    
+    If Not IsWorkbookOpen(wb, itemName, sourceInfo) Then
+        DoesSheetExist = False
+        Exit Function
+    End If
+    
+    ' Проверяем доступность листов
+    If Not AreSheetsAccessible(wb, itemName, sourceInfo) Then
+        DoesSheetExist = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim sheetExists As Boolean
+    Dim actualState As String
+    Dim sheet As Object
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Пытаемся получить лист по имени
+    Set sheet = wb.Sheets(sheetName)
+    
+    ' Проверка на случай ошибки доступа к листу
+    If Err.Number <> 0 Then
+        sheetExists = False
+        actualState = "Не существует"
+    Else
+        sheetExists = True
+        actualState = "Существует"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      DoesSheetExist (" & sheetName & ") - Actual: " & actualState & ", Match: " & sheetExists
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Освобождаем ресурсы
+    Set sheet = Nothing
+    
+    ' Вызываем базовый метод валидации
+    DoesSheetExist = ValidateWorkbook(wb, "Наличие листа '" & sheetName & "'", _
+                                   sheetExists, _
+                                   "Лист существует", _
+                                   actualState, _
+                                   itemName, sourceInfo)
+End Function
+
+'====================================================
+' ТЕСТОВАЯ ПРОЦЕДУРА ДЛЯ ДЕМОНСТРАЦИИ РАБОТЫ МОДУЛЯ
+'====================================================
+Public Sub TestWorkbookValidation()
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode False
+    ' Включаем лог в отладочное окно для анализа
+    SetDebugLogMode True
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKBOOK ==="
+    
+    ' Получаем объект приложения и активную книгу
+    Dim app As Object
+    Dim wb As Object
+    Dim nonExistentWb As Object
+    
+    Set app = Application
+    
+    ' Проверяем, есть ли открытая книга
+    On Error Resume Next
+    Set wb = app.ActiveWorkbook
+    
+    If wb Is Nothing Then
+        ' Если нет активной книги, создаем новую
+        Set wb = app.Workbooks.Add
+        Debug.Print "Создана новая книга для тестирования"
+    End If
+    
+    ' Создаем переменную для тестирования неинициализированной книги
+    Set nonExistentWb = Nothing
+    
+    ' Тест 1: Проверка инициализации книги
+    Debug.Print "1. IsWorkbookInitialized (активная книга): " & IsWorkbookInitialized(wb, "ActiveWb", "TestWorkbookValidation")
+    Debug.Print "1a. IsWorkbookInitialized (Nothing): " & IsWorkbookInitialized(nonExistentWb, "NonExistentWb", "TestWorkbookValidation")
+    
+    ' Тест 2: Проверка состояния книги (открыта/закрыта)
+    Debug.Print "2. IsWorkbookOpen: " & IsWorkbookOpen(wb, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 3: Проверка сохранённого состояния книги
+    ' Сначала проверяем текущее состояние
+    Debug.Print "3. IsWorkbookSaved (текущее состояние): " & IsWorkbookSaved(wb, wb.Saved, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Сохраняем текущее состояние для восстановления
+    Dim currentSaved As Boolean
+    currentSaved = wb.Saved
+    
+    ' Меняем состояние сохранения (добавляем пробел в ячейку A1 и удаляем его)
+    ' Это должно изменить состояние Saved на False, а затем вернуть к исходному
+    On Error Resume Next
+    Dim tempValue As String
+    Dim activeSheet As Object
+    
+    Set activeSheet = wb.activeSheet
+    tempValue = activeSheet.Range("A1").Value
+    
+    ' Меняем значение для изменения состояния Saved
+    activeSheet.Range("A1").Value = tempValue & " "
+    
+    ' Проверяем изменение состояния
+    Debug.Print "3a. IsWorkbookSaved (после изменения): " & IsWorkbookSaved(wb, False, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Возвращаем исходное значение
+    activeSheet.Range("A1").Value = tempValue
+    
+    ' Помечаем книгу как сохраненную (для тестирования)
+    Application.DisplayAlerts = False
+    If wb.path <> "" Then
+        ' Если книга уже была на диске, сохраняем ее
+        wb.Save
+    Else
+        ' Если книга новая, сохраняем во временную папку
+        Dim tempPath As String
+        tempPath = Environ("TEMP") & "\TestWorkbook_" & Format(Now, "yyyymmddhhnnss") & ".xlsx"
+        wb.SaveAs tempPath
+        ' После теста удалим файл
+    End If
+    Application.DisplayAlerts = True
+    
+    ' Проверяем состояние после сохранения
+    Debug.Print "3b. IsWorkbookSaved (после сохранения): " & IsWorkbookSaved(wb, True, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 4: Проверка состояния защиты книги
+    Debug.Print "4. IsWorkbookProtected (текущее состояние): " & IsWorkbookProtected(wb, False, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 5: Проверка свойств книги
+    Debug.Print "5a. IsWorkbookPropertyValid (Name): " & IsWorkbookPropertyValid(wb, "Name", wb.Name, "ActiveWb", "TestWorkbookValidation")
+    Debug.Print "5b. IsWorkbookPropertyValid (Path): " & IsWorkbookPropertyValid(wb, "Path", wb.path, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 6: Проверка доступности листов
+    Debug.Print "6. AreSheetsAccessible: " & AreSheetsAccessible(wb, "ActiveWb", "TestWorkbookValidation")
+    
+    ' Тест 7: Проверка наличия листа с указанным именем
+    Dim firstSheetName As String
+    firstSheetName = wb.Sheets(1).Name
+    
+    Debug.Print "7a. DoesSheetExist ('" & firstSheetName & "'): " & DoesSheetExist(wb, firstSheetName, "ActiveWb", "TestWorkbookValidation")
+    Debug.Print "7b. DoesSheetExist ('НесуществующийЛист'): " & DoesSheetExist(wb, "НесуществующийЛист", "ActiveWb", "TestWorkbookValidation")
+    
+    ' Если мы создали временную книгу и сохранили её, удаляем файл
+    If wb.path <> "" And InStr(wb.FullName, "TestWorkbook_") > 0 Then
+        ' Закрываем книгу без сохранения
+        Application.DisplayAlerts = False
+        wb.Close SaveChanges:=False
+        
+        ' Удаляем файл
+        On Error Resume Next
+        Kill wb.FullName
+        On Error GoTo 0
+        
+        Debug.Print "Временная тестовая книга удалена"
+    End If
+    
+    Debug.Print "=== ТЕСТИРОВАНИЕ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKBOOK ЗАВЕРШЕНО ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' ПРИМЕР ИСПОЛЬЗОВАНИЯ В РЕАЛЬНОМ КОДЕ
+'====================================================
+Public Sub ExampleUsage()
+    ' Отключаем MsgBox для пакетного режима
+    SetMessageBoxMode False
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKBOOK ==="
+    
+    ' Получаем объект приложения и пытаемся открыть книгу
+    Dim app As Object
+    Dim wb As Object
+    Dim excelFile As String
+    
+    Set app = Application
+    excelFile = "C:\Путь\к\файлу\Данные.xlsx"
+    
+    On Error Resume Next
+    Set wb = app.Workbooks.Open(excelFile)
+    
+    ' Проверяем успешность открытия
+    If Not IsWorkbookInitialized(wb, "MyWorkbook", "ExampleUsage") Then
+        Debug.Print "Ошибка: Не удалось открыть книгу " & excelFile
+        Exit Sub
+    End If
+    
+    ' Проверяем наличие необходимого листа
+    If Not DoesSheetExist(wb, "Данные", "MyWorkbook", "ExampleUsage") Then
+        Debug.Print "Ошибка: В книге отсутствует лист 'Данные'"
+        wb.Close False
+        Exit Sub
+    End If
+    
+    ' Выполняем операции с книгой...
+    Debug.Print "Обработка данных в книге..."
+    
+    ' Проверяем защиту перед изменением
+    If IsWorkbookProtected(wb, True, "MyWorkbook", "ExampleUsage") Then
+        Debug.Print "Предупреждение: Книга защищена, возможно не удастся внести изменения"
+    End If
+    
+    ' Сохраняем изменения
+    If wb.path <> "" Then
+        wb.Save
+        ' Проверяем, что сохранение прошло успешно
+        If IsWorkbookSaved(wb, True, "MyWorkbook", "ExampleUsage") Then
+            Debug.Print "Изменения успешно сохранены"
+        Else
+            Debug.Print "Предупреждение: Не удалось сохранить изменения"
+        End If
+    End If
+    
+    ' Закрываем книгу
+    wb.Close
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ ЗАВЕРШЕН ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+

@@ -1,0 +1,911 @@
+﻿Option Explicit
+
+'====================================================
+' Модуль валидации для объекта Excel.Worksheet
+' Предназначен для безопасной работы с листами Excel
+'====================================================
+
+'====================================================
+' Глобальные константы и переменные
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+' Ссылка на модули валидации (опционально)
+Private m_AppValidator As Object
+Private m_WbValidator As Object
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+    Set m_AppValidator = Nothing ' Будет инициализирован при необходимости
+    Set m_WbValidator = Nothing  ' Будет инициализирован при необходимости
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Установка ссылок на другие модули валидации (опционально)
+'====================================================
+Public Sub SetApplicationValidator(ByVal appValidator As Object)
+    Set m_AppValidator = appValidator
+End Sub
+
+Public Sub SetWorkbookValidator(ByVal wbValidator As Object)
+    Set m_WbValidator = wbValidator
+End Sub
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedValue As String, ByVal actualValue As String, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Ошибка валидации Excel.Worksheet! Ожидается [" & expectedValue & "], а получено [" & actualValue & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If itemName <> "" Then
+        msg = msg & vbNewLine & "Элемент: " & itemName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации Excel.Worksheet"
+    End If
+End Sub
+
+'====================================================
+' БАЗОВЫЙ МЕТОД ВАЛИДАЦИИ
+' Этот метод используется всеми другими функциями валидации
+'====================================================
+Private Function ValidateWorksheet(ByVal ws As Object, ByVal checkType As String, _
+                                ByVal checkResult As Boolean, _
+                                Optional ByVal expectedValue As String = "", _
+                                Optional ByVal actualValue As String = "", _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    ' Выполняем проверку на основе переданного результата
+    ValidateWorksheet = checkResult
+    
+    ' Если проверка не прошла, вызываем обработчик ошибки
+    If Not ValidateWorksheet Then
+        HandleValidationError expectedValue, actualValue, itemName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' ФУНКЦИИ ВАЛИДАЦИИ EXCEL.WORKSHEET
+'====================================================
+
+'----------------------------------------------------
+' 1. Проверка инициализации листа
+'----------------------------------------------------
+Public Function IsWorksheetInitialized(ByVal ws As Object, _
+                                     Optional ByVal itemName As String = "", _
+                                     Optional ByVal sourceInfo As String = "") As Boolean
+    On Error Resume Next
+    
+    Dim isInitialized As Boolean
+    Dim actualState As String
+    
+    ' Проверяем инициализацию листа, пытаясь обратиться к его свойству
+    isInitialized = Not (ws Is Nothing)
+    
+    If isInitialized Then
+        ' Дополнительная проверка доступности API через обращение к свойству
+        Dim testValue As String
+        testValue = ws.Name
+        If Err.Number <> 0 Then
+            isInitialized = False
+            actualState = "Недоступен API листа (Ошибка: " & Err.Number & " - " & Err.Description & ")"
+        Else
+            actualState = "Инициализирован"
+        End If
+    Else
+        actualState = "Не инициализирован (Nothing)"
+    End If
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetInitialized = ValidateWorksheet(ws, "Инициализация", _
+                                            isInitialized, _
+                                            "Инициализированный Excel.Worksheet", _
+                                            actualState, _
+                                            itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 2. Проверка активности листа
+'----------------------------------------------------
+Public Function IsWorksheetActive(ByVal ws As Object, ByVal shouldBeActive As Boolean, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetActive = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim parentWorkbook As Object
+    Dim isActive As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем родительскую книгу листа
+    Set parentWorkbook = ws.Parent
+    
+    ' Проверка на случай ошибки доступа к свойству Parent
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа к родительской книге: " & Err.Description
+    Else
+        ' Очищаем ошибки перед следующей проверкой
+        Err.Clear
+        
+        ' Проверяем, является ли лист активным
+        isActive = (parentWorkbook.activeSheet Is ws)
+        
+        ' Проверка на случай ошибки при сравнении
+        If Err.Number <> 0 Then
+            isCorrectState = False
+            actualState = "Ошибка при проверке активности: " & Err.Description
+        Else
+            ' Определяем, соответствует ли текущее состояние ожидаемому
+            isCorrectState = (isActive = shouldBeActive)
+            
+            ' Формируем строки для сообщений
+            If isActive Then
+                actualState = "Активен"
+            Else
+                actualState = "Не активен"
+            End If
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeActive Then
+        expectedState = "Активен"
+    Else
+        expectedState = "Не активен"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetActive - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Освобождаем ресурсы
+    Set parentWorkbook = Nothing
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetActive = ValidateWorksheet(ws, "Активность листа", _
+                                       isCorrectState, _
+                                       expectedState, _
+                                       actualState, _
+                                       itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 3. Проверка видимости листа
+'----------------------------------------------------
+Public Function IsWorksheetVisible(ByVal ws As Object, ByVal visibilityState As Integer, _
+                                Optional ByVal itemName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetVisible = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim currentVisibility As Integer
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущее состояние видимости листа
+    currentVisibility = ws.Visible
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (currentVisibility = visibilityState)
+        
+        ' Формируем строки для сообщений
+        Select Case currentVisibility
+            Case -1 ' xlSheetVisible
+                actualState = "Видимый"
+            Case 0 ' xlSheetHidden
+                actualState = "Скрытый"
+            Case 2 ' xlSheetVeryHidden
+                actualState = "Очень скрытый"
+            Case Else
+                actualState = "Неизвестное состояние: " & currentVisibility
+        End Select
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    Select Case visibilityState
+        Case -1 ' xlSheetVisible
+            expectedState = "Видимый"
+        Case 0 ' xlSheetHidden
+            expectedState = "Скрытый"
+        Case 2 ' xlSheetVeryHidden
+            expectedState = "Очень скрытый"
+        Case Else
+            expectedState = "Неизвестное состояние: " & visibilityState
+    End Select
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetVisible - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetVisible = ValidateWorksheet(ws, "Видимость листа", _
+                                        isCorrectState, _
+                                        expectedState, _
+                                        actualState, _
+                                        itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 4. Проверка защиты листа
+'----------------------------------------------------
+Public Function IsWorksheetProtected(ByVal ws As Object, ByVal shouldBeProtected As Boolean, _
+                                  Optional ByVal itemName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetProtected = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim isProtected As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущее состояние защиты листа
+    isProtected = ws.ProtectContents
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (isProtected = shouldBeProtected)
+        
+        ' Формируем строки для сообщений
+        If isProtected Then
+            actualState = "Защищен"
+        Else
+            actualState = "Не защищен"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldBeProtected Then
+        expectedState = "Защищен"
+    Else
+        expectedState = "Не защищен"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetProtected - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetProtected = ValidateWorksheet(ws, "Защита листа", _
+                                         isCorrectState, _
+                                         expectedState, _
+                                         actualState, _
+                                         itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 5. Проверка свойства листа (имя, индекс и т.д.)
+'----------------------------------------------------
+Public Function IsWorksheetPropertyValid(ByVal ws As Object, ByVal propertyName As String, _
+                                      ByVal expectedValue As Variant, _
+                                      Optional ByVal itemName As String = "", _
+                                      Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetPropertyValid = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim actualValue As Variant
+    Dim isValid As Boolean
+    Dim actualValueString As String
+    Dim expectedValueString As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем значение свойства в зависимости от его имени
+    Select Case UCase(propertyName)
+        Case "NAME", "НАЗВАНИЕ", "ИМЯ"
+            actualValue = ws.Name
+        Case "INDEX", "ИНДЕКС"
+            actualValue = ws.index
+        Case "CODENAME", "КОДОВОЕИМЯ"
+            actualValue = ws.CodeName
+        Case "STANDARDWIDTH", "СТАНДАРТНАЯШИРИНА"
+            actualValue = ws.StandardWidth
+        Case "STANDARDHEIGHT", "СТАНДАРТНАЯВЫСОТА"
+            actualValue = ws.StandardHeight
+        Case "TYPE", "ТИП"
+            actualValue = ws.Type
+        Case "DISPLAYPAGEBREAKS", "ОТОБРАЖЕНИЕРАЗРЫВОВСТРАНИЦ"
+            actualValue = ws.DisplayPageBreaks
+        Case "ENABLEAUTOFILTER", "РАЗРЕШИТЬАВТОФИЛЬТР"
+            actualValue = ws.EnableAutoFilter
+        Case "ENABLECALCULATION", "РАЗРЕШИТЬВЫЧИСЛЕНИЯ"
+            actualValue = ws.EnableCalculation
+        Case "ENABLEOUTLINING", "РАЗРЕШИТЬСТРУКТУРУ"
+            actualValue = ws.EnableOutlining
+        Case "ENABLEPIVOTTABLE", "РАЗРЕШИТЬСВОДНУЮТАБЛИЦУ"
+            actualValue = ws.EnablePivotTable
+        Case Else
+            ' Попытка получить неизвестное свойство
+            Err.Raise 17, "IsWorksheetPropertyValid", "Неизвестное свойство: " & propertyName
+    End Select
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isValid = False
+        actualValueString = "Ошибка доступа: " & Err.Description
+        expectedValueString = CStr(expectedValue)
+    Else
+        ' Преобразуем значения к строкам для сравнения
+        ' В VBA сравнение разных типов может быть проблематичным
+        actualValueString = CStr(actualValue)
+        expectedValueString = CStr(expectedValue)
+        
+        ' Сравниваем значения (без учета регистра для строк)
+        If VarType(actualValue) = vbString And VarType(expectedValue) = vbString Then
+            isValid = (LCase(actualValueString) = LCase(expectedValueString))
+        Else
+            isValid = (actualValue = expectedValue)
+        End If
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetPropertyValid (" & propertyName & ") - Actual: " & actualValueString & ", Expected: " & expectedValueString & ", Match: " & isValid
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetPropertyValid = ValidateWorksheet(ws, "Свойство " & propertyName, _
+                                             isValid, _
+                                             expectedValueString, _
+                                             actualValueString, _
+                                             itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 6. Проверка режима отображения листа (обычный, разметка страницы, предварительный просмотр)
+'----------------------------------------------------
+Public Function IsWorksheetViewMode(ByVal ws As Object, ByVal expectedMode As Integer, _
+                                 Optional ByVal itemName As String = "", _
+                                 Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        IsWorksheetViewMode = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim currentMode As Integer
+    Dim isCorrectMode As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем текущий режим отображения листа
+    currentMode = ws.Parent.Windows(1).View
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectMode = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, соответствует ли текущий режим ожидаемому
+        isCorrectMode = (currentMode = expectedMode)
+        
+        ' Формируем строки для сообщений
+        Select Case currentMode
+            Case 1 ' xlNormalView
+                actualState = "Обычный"
+            Case 2 ' xlPageBreakPreview
+                actualState = "Разметка страницы"
+            Case 3 ' xlPageLayoutView
+                actualState = "Предварительный просмотр"
+            Case Else
+                actualState = "Неизвестный режим: " & currentMode
+        End Select
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    Select Case expectedMode
+        Case 1 ' xlNormalView
+            expectedState = "Обычный"
+        Case 2 ' xlPageBreakPreview
+            expectedState = "Разметка страницы"
+        Case 3 ' xlPageLayoutView
+            expectedState = "Предварительный просмотр"
+        Case Else
+            expectedState = "Неизвестный режим: " & expectedMode
+    End Select
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      IsWorksheetViewMode - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectMode
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    IsWorksheetViewMode = ValidateWorksheet(ws, "Режим отображения", _
+                                        isCorrectMode, _
+                                        expectedState, _
+                                        actualState, _
+                                        itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 7. Проверка наличия печатной области
+'----------------------------------------------------
+Public Function hasPrintArea(ByVal ws As Object, ByVal shouldHavePrintArea As Boolean, _
+                          Optional ByVal itemName As String = "", _
+                          Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        hasPrintArea = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim hasPrintArea As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Проверяем наличие печатной области
+    Dim printArea As String
+    printArea = ws.PageSetup.printArea
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Определяем, есть ли печатная область
+        hasPrintArea = (printArea <> "")
+        
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (hasPrintArea = shouldHavePrintArea)
+        
+        ' Формируем строки для сообщений
+        If hasPrintArea Then
+            actualState = "Определена (" & printArea & ")"
+        Else
+            actualState = "Не определена"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldHavePrintArea Then
+        expectedState = "Определена"
+    Else
+        expectedState = "Не определена"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      HasPrintArea - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Вызываем базовый метод валидации
+    hasPrintArea = ValidateWorksheet(ws, "Печатная область", _
+                                  isCorrectState, _
+                                  expectedState, _
+                                  actualState, _
+                                  itemName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 8. Проверка наличия и количества данных на листе
+'----------------------------------------------------
+Public Function hasData(ByVal ws As Object, ByVal shouldHaveData As Boolean, _
+                     Optional ByVal itemName As String = "", _
+                     Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, инициализирован ли лист
+    If Not IsWorksheetInitialized(ws, itemName, sourceInfo) Then
+        hasData = False
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    Dim hasData As Boolean
+    Dim isCorrectState As Boolean
+    Dim actualState As String
+    Dim expectedState As String
+    Dim usedRangeAddress As String
+    Dim usedCellsCount As Long
+    
+    ' Очищаем любые предыдущие ошибки
+    Err.Clear
+    
+    ' Получаем используемый диапазон листа
+    Dim usedRange As Object
+    Set usedRange = ws.usedRange
+    
+    ' Проверка на случай ошибки доступа к свойству
+    If Err.Number <> 0 Then
+        isCorrectState = False
+        actualState = "Ошибка доступа: " & Err.Description
+    Else
+        ' Получаем адрес используемого диапазона
+        usedRangeAddress = usedRange.Address
+        
+        ' Получаем количество ячеек в используемом диапазоне
+        usedCellsCount = usedRange.Cells.Count
+        
+        ' Определяем, есть ли данные на листе
+        ' Можно использовать более сложную логику, например, проверять,
+        ' что в ячейках действительно есть значения, а не просто отформатированные пустые ячейки
+        hasData = (usedCellsCount > 1 Or (usedCellsCount = 1 And usedRange.Cells(1, 1).Value <> ""))
+        
+        ' Определяем, соответствует ли текущее состояние ожидаемому
+        isCorrectState = (hasData = shouldHaveData)
+        
+        ' Формируем строки для сообщений
+        If hasData Then
+            actualState = "Есть данные (диапазон: " & usedRangeAddress & ", ячеек: " & usedCellsCount & ")"
+        Else
+            actualState = "Нет данных"
+        End If
+    End If
+    
+    ' Формируем ожидаемое состояние для сообщения
+    If shouldHaveData Then
+        expectedState = "Есть данные"
+    Else
+        expectedState = "Нет данных"
+    End If
+    
+    ' Для дополнительной диагностики
+    Debug.Print "      HasData - Actual: " & actualState & ", Expected: " & expectedState & ", Match: " & isCorrectState
+    
+    ' Восстанавливаем обработку ошибок
+    On Error GoTo 0
+    
+    ' Освобождаем ресурсы
+    Set usedRange = Nothing
+    
+    ' Вызываем базовый метод валидации
+    hasData = ValidateWorksheet(ws, "Наличие данных", _
+                             isCorrectState, _
+                             expectedState, _
+                             actualState, _
+                             itemName, sourceInfo)
+End Function
+
+'====================================================
+' ТЕСТОВАЯ ПРОЦЕДУРА ДЛЯ ДЕМОНСТРАЦИИ РАБОТЫ МОДУЛЯ
+'====================================================
+Public Sub TestWorksheetValidation()
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode False
+    ' Включаем лог в отладочное окно для анализа
+    SetDebugLogMode True
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKSHEET ==="
+    
+    ' Получаем объект приложения и активный лист
+    Dim app As Object
+    Dim wb As Object
+    Dim ws As Object
+    Dim nonExistentWs As Object
+    
+    Set app = Application
+    
+    ' Проверяем, есть ли открытая книга
+    On Error Resume Next
+    Set wb = app.ActiveWorkbook
+    
+    If wb Is Nothing Then
+        ' Если нет активной книги, создаем новую
+        Set wb = app.Workbooks.Add
+        Debug.Print "Создана новая книга для тестирования"
+    End If
+    
+    ' Получаем активный лист
+    Set ws = wb.activeSheet
+    
+    ' Создаем переменную для тестирования неинициализированного листа
+    Set nonExistentWs = Nothing
+    
+    ' Тест 1: Проверка инициализации листа
+    Debug.Print "1. IsWorksheetInitialized (активный лист): " & IsWorksheetInitialized(ws, "ActiveWs", "TestWorksheetValidation")
+    Debug.Print "1a. IsWorksheetInitialized (Nothing): " & IsWorksheetInitialized(nonExistentWs, "NonExistentWs", "TestWorksheetValidation")
+    
+    ' Тест 2: Проверка активности листа
+    Debug.Print "2. IsWorksheetActive (текущий активный): " & IsWorksheetActive(ws, True, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Если в книге есть другие листы, проверяем их активность
+    If wb.Sheets.Count > 1 Then
+        Dim otherSheet As Object
+        
+        ' Находим лист, который не является активным
+        For Each otherSheet In wb.Sheets
+            If Not (otherSheet Is ws) Then
+                Debug.Print "2a. IsWorksheetActive (неактивный лист): " & IsWorksheetActive(otherSheet, False, "OtherSheet", "TestWorksheetValidation")
+                Exit For
+            End If
+        Next otherSheet
+    End If
+    
+    ' Тест 3: Проверка видимости листа
+    ' -1 = xlSheetVisible
+    Debug.Print "3. IsWorksheetVisible (активный лист): " & IsWorksheetVisible(ws, -1, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Тест 4: Проверка защиты листа
+    Debug.Print "4. IsWorksheetProtected (текущее состояние): " & IsWorksheetProtected(ws, ws.ProtectContents, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Сохраняем текущее состояние защиты для восстановления
+    Dim wasProtected As Boolean
+    wasProtected = ws.ProtectContents
+    
+    ' Если лист защищен, снимаем защиту
+    If wasProtected Then
+        On Error Resume Next
+        ws.Unprotect
+        Debug.Print "4a. IsWorksheetProtected (после снятия защиты): " & IsWorksheetProtected(ws, False, "ActiveWs", "TestWorksheetValidation")
+        On Error GoTo 0
+    Else
+        ' Если лист не защищен, устанавливаем защиту
+        On Error Resume Next
+        ws.Protect
+        Debug.Print "4a. IsWorksheetProtected (после установки защиты): " & IsWorksheetProtected(ws, True, "ActiveWs", "TestWorksheetValidation")
+        
+        ' Снимаем защиту для восстановления исходного состояния
+        ws.Unprotect
+        On Error GoTo 0
+    End If
+    
+    ' Восстанавливаем исходное состояние защиты
+    If wasProtected Then
+        On Error Resume Next
+        ws.Protect
+        On Error GoTo 0
+    End If
+    
+    ' Тест 5: Проверка свойств листа
+    Debug.Print "5a. IsWorksheetPropertyValid (Name): " & IsWorksheetPropertyValid(ws, "Name", ws.Name, "ActiveWs", "TestWorksheetValidation")
+    Debug.Print "5b. IsWorksheetPropertyValid (Index): " & IsWorksheetPropertyValid(ws, "Index", ws.index, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Тест 6: Проверка режима отображения листа
+    ' Получаем текущий режим отображения
+    Dim currentViewMode As Integer
+    On Error Resume Next
+    currentViewMode = wb.Windows(1).View
+    On Error GoTo 0
+    
+    Debug.Print "6. IsWorksheetViewMode (текущий режим): " & IsWorksheetViewMode(ws, currentViewMode, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Тест 7: Проверка наличия печатной области
+    ' Получаем текущее состояние печатной области
+    Dim hasPrintAreaDefined As Boolean
+    hasPrintAreaDefined = (ws.PageSetup.printArea <> "")
+    
+    Debug.Print "7. HasPrintArea (текущее состояние): " & hasPrintArea(ws, hasPrintAreaDefined, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Тест 8: Проверка наличия данных на листе
+    Debug.Print "8. HasData (текущее состояние): " & hasData(ws, True, "ActiveWs", "TestWorksheetValidation")
+    
+    ' Создаем временный пустой лист для тестирования
+    Dim emptySheet As Object
+    On Error Resume Next
+    Set emptySheet = wb.Sheets.Add(After:=wb.Sheets(wb.Sheets.Count))
+    
+    If Not (emptySheet Is Nothing) Then
+        Debug.Print "8a. HasData (пустой лист): " & hasData(emptySheet, False, "EmptySheet", "TestWorksheetValidation")
+        
+        ' Удаляем временный лист
+        Application.DisplayAlerts = False
+        emptySheet.Delete
+        Application.DisplayAlerts = True
+    End If
+    On Error GoTo 0
+    
+    Debug.Print "=== ТЕСТИРОВАНИЕ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKSHEET ЗАВЕРШЕНО ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
+'====================================================
+' ПРИМЕР ИСПОЛЬЗОВАНИЯ В РЕАЛЬНОМ КОДЕ
+'====================================================
+Public Sub ExampleUsage()
+    ' Отключаем MsgBox для пакетного режима
+    SetMessageBoxMode False
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ EXCEL.WORKSHEET ==="
+    
+    ' Получаем объект приложения и пытаемся открыть книгу
+    Dim app As Object
+    Dim wb As Object
+    Dim ws As Object
+    Dim dataSheet As Object
+    
+    Set app = Application
+    
+    ' Предположим, что книга уже открыта
+    Set wb = app.ActiveWorkbook
+    
+    If wb Is Nothing Then
+        Debug.Print "Ошибка: Нет активной книги"
+        Exit Sub
+    End If
+    
+    ' Пытаемся получить лист "Данные"
+    On Error Resume Next
+    Set dataSheet = wb.Sheets("Данные")
+    
+    ' Если лист не найден, пробуем получить активный лист
+    If dataSheet Is Nothing Then
+        Set dataSheet = wb.activeSheet
+        Debug.Print "Лист 'Данные' не найден, используем активный лист: " & dataSheet.Name
+    End If
+    
+    ' Проверяем инициализацию листа
+    If Not IsWorksheetInitialized(dataSheet, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Ошибка: Не удалось получить доступ к листу"
+        Exit Sub
+    End If
+    
+    ' Проверяем наличие данных на листе
+    If Not hasData(dataSheet, True, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Предупреждение: На листе нет данных"
+    End If
+    
+    ' Проверяем защиту листа перед работой
+    If IsWorksheetProtected(dataSheet, True, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Предупреждение: Лист защищен, снимаем защиту"
+        
+        On Error Resume Next
+        dataSheet.Unprotect
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось снять защиту с листа. Возможно, требуется пароль."
+            Exit Sub
+        End If
+        On Error GoTo 0
+    End If
+    
+    ' Выполняем операции с листом...
+    Debug.Print "Выполнение операций с листом..."
+    
+    ' Проверяем видимость листа
+    If Not IsWorksheetVisible(dataSheet, -1, "DataSheet", "ExampleUsage") Then ' -1 = xlSheetVisible
+        Debug.Print "Предупреждение: Лист скрыт, делаем его видимым"
+        
+        On Error Resume Next
+        dataSheet.Visible = -1 ' xlSheetVisible
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось сделать лист видимым. " & Err.Description
+        End If
+        On Error GoTo 0
+    End If
+    
+    ' Активируем лист, если он не активен
+    If Not IsWorksheetActive(dataSheet, True, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Активируем лист для работы"
+        
+        On Error Resume Next
+        dataSheet.Activate
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось активировать лист. " & Err.Description
+        End If
+        On Error GoTo 0
+    End If
+    
+    ' Устанавливаем печатную область, если она не установлена
+    If Not hasPrintArea(dataSheet, True, "DataSheet", "ExampleUsage") Then
+        Debug.Print "Устанавливаем печатную область"
+        
+        On Error Resume Next
+        ' Используем используемый диапазон как печатную область
+        dataSheet.PageSetup.printArea = dataSheet.usedRange.Address
+        
+        If Err.Number <> 0 Then
+            Debug.Print "Ошибка: Не удалось установить печатную область. " & Err.Description
+        End If
+        On Error GoTo 0
+    End If
+    
+    Debug.Print "=== ПРИМЕР ИСПОЛЬЗОВАНИЯ ЗАВЕРШЕН ==="
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+

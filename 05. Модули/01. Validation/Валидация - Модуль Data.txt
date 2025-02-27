@@ -1,0 +1,537 @@
+﻿Option Explicit
+
+'====================================================
+' Глобальные настройки модуля
+'====================================================
+' Режим вывода сообщений об ошибках
+Private Const DEFAULT_SHOW_MESSAGE_BOX As Boolean = True  ' Показывать MsgBox по умолчанию
+Private Const DEFAULT_LOG_TO_DEBUG As Boolean = True      ' Выводить в окно отладки по умолчанию
+
+' Текущие настройки (можно изменять программно)
+Private m_ShowMessageBox As Boolean
+Private m_LogToDebug As Boolean
+
+'====================================================
+' Инициализация модуля
+'====================================================
+Private Sub Class_Initialize()
+    ' Для стандартного модуля использовать Sub Initialize()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Публичные функции для управления режимами вывода сообщений
+'====================================================
+Public Sub SetMessageBoxMode(ByVal showMessageBox As Boolean)
+    m_ShowMessageBox = showMessageBox
+End Sub
+
+Public Sub SetDebugLogMode(ByVal logToDebug As Boolean)
+    m_LogToDebug = logToDebug
+End Sub
+
+Public Sub RestoreDefaultSettings()
+    m_ShowMessageBox = DEFAULT_SHOW_MESSAGE_BOX
+    m_LogToDebug = DEFAULT_LOG_TO_DEBUG
+End Sub
+
+'====================================================
+' Вспомогательная функция: получение типа данных
+'====================================================
+Private Function GetDataTypeName(ByVal var As Variant) As String
+    On Error Resume Next  ' Защита от ошибок при определении типа
+    GetDataTypeName = typeName(var)
+    If Err.Number <> 0 Then
+        GetDataTypeName = "Error"   ' Если произошла ошибка, вернуть "Error"
+        Err.Clear
+    End If
+End Function
+
+'====================================================
+' Централизованная обработка ошибок валидации
+'====================================================
+Private Sub HandleValidationError(ByVal expectedType As String, ByVal actualType As String, _
+                                Optional ByVal variableName As String = "", _
+                                Optional ByVal sourceInfo As String = "")
+    Dim msg As String
+    
+    ' Формируем базовое сообщение об ошибке
+    msg = "Несоответствие типов данных! Ожидается [" & expectedType & "], а получен [" & actualType & "]"
+    
+    ' Добавляем контекстную информацию, если она предоставлена
+    If variableName <> "" Then
+        msg = msg & vbNewLine & "Переменная: " & variableName
+    End If
+    
+    If sourceInfo <> "" Then
+        msg = msg & vbNewLine & "Источник: " & sourceInfo
+    End If
+    
+    ' Вывод в окно отладки (если включено)
+    If m_LogToDebug Then
+        Debug.Print msg
+    End If
+    
+    ' Вывод диалогового окна (если включено)
+    If m_ShowMessageBox Then
+        MsgBox msg, vbExclamation, "Ошибка валидации"
+    End If
+End Sub
+
+'====================================================
+' БАЗОВЫЙ МЕТОД ВАЛИДАЦИИ
+' Этот метод используется всеми другими функциями валидации
+'====================================================
+Private Function ValidateDataType(ByVal var As Variant, ByVal expectedType As String, _
+                                ByVal typeCheckFunction As Boolean, _
+                                Optional ByVal variableName As String = "", _
+                                Optional ByVal sourceInfo As String = "") As Boolean
+    
+    ' Выполняем проверку на основе переданной функции проверки
+    ValidateDataType = typeCheckFunction
+    
+    ' Если проверка не прошла, вызываем обработчик ошибки
+    If Not ValidateDataType Then
+        Dim actualType As String
+        actualType = GetDataTypeName(var)
+        HandleValidationError expectedType, actualType, variableName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' Унифицированная функция для проверки через TypeName
+'====================================================
+Private Function CheckTypeByName(ByVal var As Variant, ByVal expectedTypeName As String, _
+                               Optional ByVal additionalTypeNames As String = "") As Boolean
+    On Error Resume Next
+    Dim typeName As String
+    typeName = GetDataTypeName(var)
+    
+    ' Проверка на основной тип
+    CheckTypeByName = (typeName = expectedTypeName)
+    
+    ' Проверка на дополнительные допустимые типы (если указаны)
+    If Not CheckTypeByName And additionalTypeNames <> "" Then
+        Dim additionalTypes As Variant
+        additionalTypes = Split(additionalTypeNames, ",")
+        
+        Dim i As Long
+        For i = LBound(additionalTypes) To UBound(additionalTypes)
+            If Trim(additionalTypes(i)) = typeName Then
+                CheckTypeByName = True
+                Exit For
+            End If
+        Next i
+    End If
+    
+    If Err.Number <> 0 Then
+        CheckTypeByName = False
+        Err.Clear
+    End If
+End Function
+
+'====================================================
+' ФУНКЦИИ ВАЛИДАЦИИ ТИПОВ ДАННЫХ
+'====================================================
+
+'----------------------------------------------------
+' 1. Строковый тип (String)
+'----------------------------------------------------
+Public Function IsDataTypeString(ByVal var As Variant, _
+                              Optional ByVal variableName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeString = ValidateDataType(var, "String", _
+                                      CheckTypeByName(var, "String"), _
+                                      variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 2. Целочисленные типы
+'----------------------------------------------------
+' 2.1 Integer (строгая проверка, только Integer)
+Public Function IsDataTypeInteger(ByVal var As Variant, _
+                               Optional ByVal variableName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeInteger = ValidateDataType(var, "Integer", _
+                                       CheckTypeByName(var, "Integer"), _
+                                       variableName, sourceInfo)
+End Function
+
+' 2.2 Long (принимает Integer как допустимый тип)
+Public Function IsDataTypeLong(ByVal var As Variant, _
+                            Optional ByVal variableName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeLong = ValidateDataType(var, "Long (принимается Integer)", _
+                                    CheckTypeByName(var, "Long", "Integer"), _
+                                    variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 3. Число с плавающей точкой (Double)
+'----------------------------------------------------
+Public Function IsDataTypeDouble(ByVal var As Variant, _
+                              Optional ByVal variableName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeDouble = ValidateDataType(var, "Double", _
+                                      CheckTypeByName(var, "Double"), _
+                                      variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 4. Дата и время (Date)
+'----------------------------------------------------
+Public Function IsDataTypeDate(ByVal var As Variant, _
+                            Optional ByVal variableName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeDate = ValidateDataType(var, "Date", _
+                                    CheckTypeByName(var, "Date"), _
+                                    variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 5. Логический тип (Boolean)
+'----------------------------------------------------
+Public Function IsDataTypeBoolean(ByVal var As Variant, _
+                               Optional ByVal variableName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeBoolean = ValidateDataType(var, "Boolean", _
+                                       CheckTypeByName(var, "Boolean"), _
+                                       variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 6. Специальные значения Variant
+'----------------------------------------------------
+' 6.1 Null
+Public Function IsDataTypeNull(ByVal var As Variant, _
+                            Optional ByVal variableName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeNull = ValidateDataType(var, "Null", _
+                                    IsNull(var), _
+                                    variableName, sourceInfo)
+End Function
+
+' 6.2 Empty
+Public Function IsDataTypeEmpty(ByVal var As Variant, _
+                             Optional ByVal variableName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeEmpty = ValidateDataType(var, "Empty", _
+                                     IsEmpty(var), _
+                                     variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' 7. Объектные типы (унифицированный подход)
+'----------------------------------------------------
+' 7.1 Любой объект
+Public Function IsDataTypeObject(ByVal var As Variant, _
+                              Optional ByVal variableName As String = "", _
+                              Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeObject = ValidateDataType(var, "Объект", _
+                                      IsObject(var), _
+                                      variableName, sourceInfo)
+End Function
+
+' 7.2 Dictionary
+Public Function IsDataTypeDictionary(ByVal var As Variant, _
+                                  Optional ByVal variableName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeDictionary = ValidateDataType(var, "Scripting.Dictionary", _
+                                          CheckTypeByName(var, "Dictionary"), _
+                                          variableName, sourceInfo)
+End Function
+
+' 7.3 Collection
+Public Function IsDataTypeCollection(ByVal var As Variant, _
+                                  Optional ByVal variableName As String = "", _
+                                  Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeCollection = ValidateDataType(var, "Collection", _
+                                          CheckTypeByName(var, "Collection"), _
+                                          variableName, sourceInfo)
+End Function
+
+' 7.4 Массив
+Public Function IsDataTypeArray(ByVal var As Variant, _
+                             Optional ByVal variableName As String = "", _
+                             Optional ByVal sourceInfo As String = "") As Boolean
+    IsDataTypeArray = ValidateDataType(var, "Массив", _
+                                     IsArray(var), _
+                                     variableName, sourceInfo)
+End Function
+
+'====================================================
+' РАСШИРЕННЫЕ ФУНКЦИИ ВАЛИДАЦИИ
+'====================================================
+
+'----------------------------------------------------
+' Проверка на принадлежность к числовому типу (любому)
+'----------------------------------------------------
+Public Function IsDataTypeNumeric(ByVal var As Variant, _
+                               Optional ByVal variableName As String = "", _
+                               Optional ByVal sourceInfo As String = "") As Boolean
+    ' VBA IsNumeric работает иначе и учитывает строки, которые можно преобразовать в число
+    ' Поэтому проверяем непосредственно типы
+    Dim typeName As String
+    typeName = GetDataTypeName(var)
+    
+    Dim isNumericType As Boolean
+    isNumericType = (typeName = "Integer" Or typeName = "Long" Or _
+                     typeName = "Double" Or typeName = "Single" Or _
+                     typeName = "Byte" Or typeName = "Currency" Or _
+                     typeName = "Decimal")
+    
+    IsDataTypeNumeric = ValidateDataType(var, "Число (любого типа)", _
+                                       isNumericType, _
+                                       variableName, sourceInfo)
+End Function
+
+'----------------------------------------------------
+' Проверка конкретного типа объекта
+'----------------------------------------------------
+Public Function IsObjectOfType(ByVal obj As Variant, ByVal typeName As String, _
+                            Optional ByVal variableName As String = "", _
+                            Optional ByVal sourceInfo As String = "") As Boolean
+    ' Сначала проверяем, что это объект
+    If Not IsObject(obj) Then
+        IsObjectOfType = False
+        HandleValidationError "Объект типа " & typeName, GetDataTypeName(obj), variableName, sourceInfo
+        Exit Function
+    End If
+    
+    ' Затем проверяем тип объекта
+    On Error Resume Next
+    Dim actualTypeName As String
+    actualTypeName = GetDataTypeName(obj)
+    
+    IsObjectOfType = (actualTypeName = typeName)
+    
+    If Err.Number <> 0 Or Not IsObjectOfType Then
+        IsObjectOfType = False
+        If Err.Number <> 0 Then Err.Clear
+        HandleValidationError "Объект типа " & typeName, actualTypeName, variableName, sourceInfo
+    End If
+End Function
+
+'====================================================
+' Расширенная тестовая процедура для демонстрации работы функций валидации
+'====================================================
+Public Sub TestDataTypeValidation()
+    ' Локальная вспомогательная процедура для группировки и форматирования тестов
+    Dim TestHeader As String
+    
+    ' Отключаем MsgBox для автоматических тестов
+    SetMessageBoxMode True
+    
+    ' Начало тестирования
+    Debug.Print "=== НАЧАЛО ТЕСТИРОВАНИЯ МОДУЛЯ ВАЛИДАЦИИ ==="
+    
+    ' Подготовка тестовых данных
+    Dim v As Variant
+    Dim arr(1 To 3) As Integer
+    Dim dict As Object
+    Dim col As New Collection
+    
+    Set dict = CreateObject("Scripting.Dictionary")
+    
+    '----------------------------------------------------
+    ' 1. Тесты строковых типов
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ СТРОКОВЫХ ТИПОВ ---"
+    Debug.Print TestHeader
+    
+    v = "Тестовая строка"
+    Debug.Print "IsDataTypeString('Тестовая строка'):", IsDataTypeString(v, "stringVar", "TestDataTypeValidation")
+    
+    v = 42
+    Debug.Print "IsDataTypeString(42):", IsDataTypeString(v, "numberAsString", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 2. Тесты целочисленных типов
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ЦЕЛОЧИСЛЕННЫХ ТИПОВ ---"
+    Debug.Print TestHeader
+    
+    ' 2.1 Integer
+    v = CInt(10)
+    Debug.Print "IsDataTypeInteger(CInt(10)):", IsDataTypeInteger(v, "intVar", "TestDataTypeValidation")
+    
+    v = CLng(10)
+    Debug.Print "IsDataTypeInteger(CLng(10)):", IsDataTypeInteger(v, "longAsInt", "TestDataTypeValidation")
+    
+    ' 2.2 Long
+    v = CLng(2147483647) ' Максимальное значение Long
+    Debug.Print "IsDataTypeLong(CLng(2147483647)):", IsDataTypeLong(v, "longVar", "TestDataTypeValidation")
+    
+    v = CInt(100)
+    Debug.Print "IsDataTypeLong(CInt(100)):", IsDataTypeLong(v, "intAsLong", "TestDataTypeValidation")
+    
+    v = CDbl(100.5)
+    Debug.Print "IsDataTypeLong(CDbl(100.5)):", IsDataTypeLong(v, "doubleAsLong", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 3. Тесты чисел с плавающей точкой
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ЧИСЕЛ С ПЛАВАЮЩЕЙ ТОЧКОЙ ---"
+    Debug.Print TestHeader
+    
+    v = CDbl(3.14159)
+    Debug.Print "IsDataTypeDouble(CDbl(3.14159)):", IsDataTypeDouble(v, "doubleVar", "TestDataTypeValidation")
+    
+    v = CInt(42)
+    Debug.Print "IsDataTypeDouble(CInt(42)):", IsDataTypeDouble(v, "intAsDouble", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 4. Тесты дат
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ДАТ ---"
+    Debug.Print TestHeader
+    
+    v = DateSerial(2025, 2, 26)
+    Debug.Print "IsDataTypeDate(DateSerial(2025,2,26)):", IsDataTypeDate(v, "dateVar", "TestDataTypeValidation")
+    
+    v = Now
+    Debug.Print "IsDataTypeDate(Now):", IsDataTypeDate(v, "currentDateTime", "TestDataTypeValidation")
+    
+    v = "26.02.2025"
+    Debug.Print "IsDataTypeDate('26.02.2025'):", IsDataTypeDate(v, "dateString", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 5. Тесты логических типов
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ЛОГИЧЕСКИХ ТИПОВ ---"
+    Debug.Print TestHeader
+    
+    v = False
+    Debug.Print "IsDataTypeBoolean(False):", IsDataTypeBoolean(v, "boolVar", "TestDataTypeValidation")
+    
+    v = 0
+    Debug.Print "IsDataTypeBoolean(0):", IsDataTypeBoolean(v, "zeroAsBool", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 6. Тесты специальных значений
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ СПЕЦИАЛЬНЫХ ЗНАЧЕНИЙ ---"
+    Debug.Print TestHeader
+    
+    ' 6.1 Null
+    v = Null
+    Debug.Print "IsDataTypeNull(Null):", IsDataTypeNull(v, "nullVar", "TestDataTypeValidation")
+    
+    v = Empty
+    Debug.Print "IsDataTypeNull(Empty):", IsDataTypeNull(v, "emptyAsNull", "TestDataTypeValidation")
+    
+    ' 6.2 Empty
+    Dim uninitializedVar As Variant ' По умолчанию Empty
+    Debug.Print "IsDataTypeEmpty(неинициализированная переменная):", IsDataTypeEmpty(uninitializedVar, "emptyVar", "TestDataTypeValidation")
+    
+    v = 0
+    Debug.Print "IsDataTypeEmpty(0):", IsDataTypeEmpty(v, "zeroAsEmpty", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 7. Тесты объектных типов
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ ОБЪЕКТНЫХ ТИПОВ ---"
+    Debug.Print TestHeader
+    
+    ' 7.1 Object
+    Set v = col
+    Debug.Print "IsDataTypeObject(Collection):", IsDataTypeObject(v, "objectVar", "TestDataTypeValidation")
+    
+    v = "Строка"
+    Debug.Print "IsDataTypeObject('Строка'):", IsDataTypeObject(v, "stringAsObject", "TestDataTypeValidation")
+    
+    ' 7.2 Dictionary
+    Set v = dict
+    Debug.Print "IsDataTypeDictionary(dict):", IsDataTypeDictionary(v, "dictVar", "TestDataTypeValidation")
+    
+    Set v = col
+    Debug.Print "IsDataTypeDictionary(Collection):", IsDataTypeDictionary(v, "colAsDict", "TestDataTypeValidation")
+    
+    ' 7.3 Collection
+    Set v = col
+    Debug.Print "IsDataTypeCollection(Collection):", IsDataTypeCollection(v, "colVar", "TestDataTypeValidation")
+    
+    Set v = dict
+    Debug.Print "IsDataTypeCollection(Dictionary):", IsDataTypeCollection(v, "dictAsCol", "TestDataTypeValidation")
+    
+    ' 7.4 Array
+    v = arr
+    Debug.Print "IsDataTypeArray(arr):", IsDataTypeArray(v, "arrayVar", "TestDataTypeValidation")
+    
+    v = "Не массив"
+    Debug.Print "IsDataTypeArray('Не массив'):", IsDataTypeArray(v, "stringAsArray", "TestDataTypeValidation")
+    
+    '----------------------------------------------------
+    ' 8. Тесты расширенных функций
+    '----------------------------------------------------
+    TestHeader = vbNewLine & "--- ТЕСТЫ РАСШИРЕННЫХ ФУНКЦИЙ ---"
+    Debug.Print TestHeader
+    
+    ' 8.1 IsDataTypeNumeric
+    v = CInt(10)
+    Debug.Print "IsDataTypeNumeric(CInt(10)):", IsDataTypeNumeric(v, "numericInt", "TestDataTypeValidation")
+    
+    v = CDbl(3.14)
+    Debug.Print "IsDataTypeNumeric(CDbl(3.14)):", IsDataTypeNumeric(v, "numericDouble", "TestDataTypeValidation")
+    
+    v = "100"
+    Debug.Print "IsDataTypeNumeric('100'):", IsDataTypeNumeric(v, "numericString", "TestDataTypeValidation")
+    
+    ' 8.2 IsObjectOfType
+    Set v = col
+    Debug.Print "IsObjectOfType(col, 'Collection'):", IsObjectOfType(v, "Collection", "typedObj", "TestDataTypeValidation")
+    
+    Set v = dict
+    Debug.Print "IsObjectOfType(dict, 'Collection'):", IsObjectOfType(v, "Collection", "wrongTypeObj", "TestDataTypeValidation")
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+    
+    Debug.Print vbNewLine & "=== ТЕСТИРОВАНИЕ ЗАВЕРШЕНО ==="
+End Sub
+
+'====================================================
+' Пример использования в реальном коде
+'====================================================
+Public Sub ExampleUsage()
+    ' Пример использования в пакетном режиме (без всплывающих окон)
+    SetMessageBoxMode False
+    
+    ' Проверка входных параметров
+    Dim userName As String
+    userName = "John Doe"
+    
+    If Not IsDataTypeString(userName, "userName", "ExampleUsage") Then
+        ' Обработка ошибки
+        Debug.Print "Ошибка: Неверный тип имени пользователя"
+        Exit Sub
+    End If
+    
+    ' Проверка числового параметра
+    Dim userAge As Integer
+    userAge = 30
+    
+    If Not IsDataTypeInteger(userAge, "userAge", "ExampleUsage") Then
+        ' Обработка ошибки
+        Debug.Print "Ошибка: Неверный тип возраста пользователя"
+        Exit Sub
+    End If
+    
+    ' Проверка параметра-даты
+    Dim registrationDate As Date
+    registrationDate = DateSerial(2023, 1, 15)
+    
+    If Not IsDataTypeDate(registrationDate, "registrationDate", "ExampleUsage") Then
+        ' Обработка ошибки
+        Debug.Print "Ошибка: Неверный тип даты регистрации"
+        Exit Sub
+    End If
+    
+    ' Успешное выполнение
+    Debug.Print "Все проверки пройдены успешно!"
+    
+    ' Восстанавливаем настройки по умолчанию
+    RestoreDefaultSettings
+End Sub
+
