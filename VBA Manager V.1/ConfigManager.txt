@@ -1,0 +1,676 @@
+' Класс ConfigManager
+' Обеспечивает централизованное управление настройками приложения
+' Использует FileSystemManager для операций с файлами конфигурации
+
+Option Explicit
+
+' Константы
+ Private Const MODULE_NAME As String = "ConfigManager"
+
+' Пути к файлам конфигурации по умолчанию
+ Private Const DEFAULT_CONFIG_PATH As String = "C:\Users\dalis\AppData\Local\ExcellentVBA\Config\"
+ Private Const DEFAULT_CONFIG_FILE As String = "ExcellentVBA.ini"
+
+' Константы для разделов конфигурации
+ Private Const CONFIG_SECTION_GENERAL As String = "General"
+ Private Const CONFIG_SECTION_LOGGING As String = "Logging"
+ Private Const CONFIG_SECTION_COMPONENTS As String = "Components"
+ Private Const CONFIG_SECTION_UI As String = "UI"
+ Private Const CONFIG_SECTION_PATHS As String = "Paths"
+
+' Константы для параметров конфигурации по умолчанию
+ Private Const DEFAULT_DEBUG_MODE As Boolean = False
+ Private Const DEFAULT_AUTO_UPDATE As Boolean = True
+ Private Const DEFAULT_LANGUAGE As String = "Russian"
+ Private Const DEFAULT_THEME As String = "Light"
+
+' Singleton экземпляр
+ Private m_Instance As ConfigManager
+
+' Ссылки на глобальные объекты
+ Private m_Logger As Object
+ Private m_ErrorHandler As Object
+ Private m_FileSystemManager As Object
+
+' Свойства
+ Private m_ConfigFilePath As String
+ Private m_IsConfigLoaded As Boolean
+ Private m_ConfigValues As Object  ' Dictionary для хранения значений конфигурации
+
+' Инициализация
+ Private Sub Class_Initialize()
+210     InitGlobals
+220
+230     ' Установка пути к файлу конфигурации по умолчанию
+240     m_ConfigFilePath = DEFAULT_CONFIG_PATH & DEFAULT_CONFIG_FILE
+250     m_IsConfigLoaded = False
+260
+270     ' Создание словаря для хранения значений конфигурации
+280     Set m_ConfigValues = CreateObject("Scripting.Dictionary")
+290
+300     If Not m_Logger Is Nothing Then
+310         m_Logger.Log_Info "ConfigManager инициализирован", MODULE_NAME
+320     End If
+330 End Sub
+
+' Получение экземпляра (реализация Singleton)
+ Public Function GetInstance() As ConfigManager
+350     If m_Instance Is Nothing Then
+360         Set m_Instance = New ConfigManager
+370     End If
+380     Set GetInstance = m_Instance
+390 End Function
+
+'-----------------------------------------------------------------------------
+' Методы загрузки и сохранения конфигурации
+'-----------------------------------------------------------------------------
+
+' Загрузка конфигурации из файла
+ Public Function LoadConfig(Optional ByVal ConfigFilePath As String = "") As Boolean
+410     On Error GoTo ErrorHandler
+420
+430     ' Если указан путь к файлу, используем его
+440     If Len(Trim(ConfigFilePath)) > 0 Then
+450         m_ConfigFilePath = ConfigFilePath
+460     End If
+470
+480     If Not m_Logger Is Nothing Then
+490         m_Logger.Log_Info "Загрузка конфигурации из файла: " & m_ConfigFilePath, MODULE_NAME
+500     End If
+510
+520     ' Проверка существования файла конфигурации
+530     If Not m_FileSystemManager.FileExists(m_ConfigFilePath) Then
+540         ' Если файл не существует, создаем его с настройками по умолчанию
+550         If Not m_Logger Is Nothing Then
+560             m_Logger.Log_Warning "Файл конфигурации не найден. Создание файла с настройками по умолчанию.", MODULE_NAME
+570         End If
+580
+590         ' Создание каталога для файла конфигурации, если он не существует
+600         Dim configDir As String
+610         configDir = m_FileSystemManager.GetDirectoryPath(m_ConfigFilePath)
+620
+630         If Not m_FileSystemManager.DirectoryExists(configDir) Then
+640             If Not m_FileSystemManager.CreateDirectoryRecursive(configDir) Then
+650                 If Not m_Logger Is Nothing Then
+660                     m_Logger.Log_Error "Не удалось создать каталог для файла конфигурации: " & configDir, MODULE_NAME
+670                 End If
+680                 LoadConfig = False
+690                 Exit Function
+700             End If
+710         End If
+720
+730         ' Создание файла с настройками по умолчанию
+740         If Not SaveDefaultConfig Then
+750             LoadConfig = False
+760             Exit Function
+770         End If
+780     End If
+790
+800     ' Загрузка значений из файла конфигурации
+810     If Not LoadConfigValues Then
+820         LoadConfig = False
+830         Exit Function
+840     End If
+850
+860     m_IsConfigLoaded = True
+870     LoadConfig = True
+880
+890     If Not m_Logger Is Nothing Then
+900         m_Logger.Log_Success "Конфигурация успешно загружена из файла: " & m_ConfigFilePath, MODULE_NAME
+910     End If
+920
+930     Exit Function
+940
+950 ErrorHandler:
+960     If Not m_ErrorHandler Is Nothing Then
+970         m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".LoadConfig", Erl, False
+980     Else
+990         Debug.Print "Ошибка в " & MODULE_NAME & ".LoadConfig" & ": " & Err.Number & " - " & Err.Description
+1000    End If
+1010    LoadConfig = False
+1020    Resume Next
+1030 End Function
+
+' Сохранение конфигурации в файл
+ Public Function SaveConfig(Optional ByVal ConfigFilePath As String = "") As Boolean
+1050    On Error GoTo ErrorHandler
+1060
+1070    ' Если указан путь к файлу, используем его
+1080    If Len(Trim(ConfigFilePath)) > 0 Then
+1090        m_ConfigFilePath = ConfigFilePath
+1100    End If
+1110
+1120    If Not m_Logger Is Nothing Then
+1130        m_Logger.Log_Info "Сохранение конфигурации в файл: " & m_ConfigFilePath, MODULE_NAME
+1140    End If
+1150
+1160    ' Создание каталога для файла конфигурации, если он не существует
+1170    Dim configDir As String
+1180    configDir = m_FileSystemManager.GetDirectoryPath(m_ConfigFilePath)
+1190
+1200    If Not m_FileSystemManager.DirectoryExists(configDir) Then
+1210        If Not m_FileSystemManager.CreateDirectoryRecursive(configDir) Then
+1220            If Not m_Logger Is Nothing Then
+1230                m_Logger.Log_Error "Не удалось создать каталог для файла конфигурации: " & configDir, MODULE_NAME
+1240            End If
+1250            SaveConfig = False
+1260            Exit Function
+1270        End If
+1280    End If
+1290
+1300    ' Если конфигурация еще не загружена, инициализируем значения по умолчанию
+1310    If Not m_IsConfigLoaded Then
+1320        InitDefaultValues
+1330    End If
+1340
+1350    ' Преобразование словаря значений в текст INI-файла
+1360    Dim iniContent As String
+1370    iniContent = BuildINIContent()
+1380
+1390    ' Запись файла конфигурации
+1400    If Not m_FileSystemManager.WriteTextFile(m_ConfigFilePath, iniContent, False) Then
+1410        If Not m_Logger Is Nothing Then
+1420            m_Logger.Log_Error "Не удалось записать файл конфигурации: " & m_ConfigFilePath, MODULE_NAME
+1430        End If
+1440        SaveConfig = False
+1450        Exit Function
+1460    End If
+1470
+1480    SaveConfig = True
+1490
+1500    If Not m_Logger Is Nothing Then
+1510        m_Logger.Log_Success "Конфигурация успешно сохранена в файл: " & m_ConfigFilePath, MODULE_NAME
+1520    End If
+1530
+1540    Exit Function
+1550
+1560 ErrorHandler:
+1570    If Not m_ErrorHandler Is Nothing Then
+1580        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".SaveConfig", Erl, False
+1590    Else
+1600        Debug.Print "Ошибка в " & MODULE_NAME & ".SaveConfig" & ": " & Err.Number & " - " & Err.Description
+1610    End If
+1620    SaveConfig = False
+1630    Resume Next
+1640 End Function
+
+' Сохранение настроек по умолчанию в файл
+ Private Function SaveDefaultConfig() As Boolean
+1660    On Error GoTo ErrorHandler
+1670
+1680    ' Инициализация словаря значений настройками по умолчанию
+1690    InitDefaultValues
+1700
+1710    ' Сохранение конфигурации
+1720    SaveDefaultConfig = SaveConfig
+1730
+1740    Exit Function
+1750
+1760 ErrorHandler:
+1770    If Not m_ErrorHandler Is Nothing Then
+1780        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".SaveDefaultConfig", Erl, False
+1790    Else
+1800        Debug.Print "Ошибка в " & MODULE_NAME & ".SaveDefaultConfig" & ": " & Err.Number & " - " & Err.Description
+1810    End If
+1820    SaveDefaultConfig = False
+1830    Resume Next
+1840 End Function
+
+' Инициализация значений по умолчанию
+ Private Sub InitDefaultValues()
+1860    On Error GoTo ErrorHandler
+1870
+1880    ' Очистка словаря значений
+1890    m_ConfigValues.RemoveAll
+1900
+1910    ' Секция General
+1920    SetConfigValue CONFIG_SECTION_GENERAL, "DebugMode", CStr(DEFAULT_DEBUG_MODE)
+1930    SetConfigValue CONFIG_SECTION_GENERAL, "AutoUpdate", CStr(DEFAULT_AUTO_UPDATE)
+1940    SetConfigValue CONFIG_SECTION_GENERAL, "Language", DEFAULT_LANGUAGE
+1950    SetConfigValue CONFIG_SECTION_GENERAL, "Version", "1.0.0"
+1960
+1970    ' Секция Logging
+1980    SetConfigValue CONFIG_SECTION_LOGGING, "LogsEnabled", "True"
+1990    SetConfigValue CONFIG_SECTION_LOGGING, "LogLevel", "Debug"
+2000    SetConfigValue CONFIG_SECTION_LOGGING, "LogProviderTextEnabled", "True"
+2010    SetConfigValue CONFIG_SECTION_LOGGING, "LogProviderImmediateEnabled", "True"
+2020    SetConfigValue CONFIG_SECTION_LOGGING, "LogTextFilePath", DEFAULT_CONFIG_PATH & "..\Logs\"
+2030    SetConfigValue CONFIG_SECTION_LOGGING, "LogMaximumFileSize", "52428800"
+2040
+2050    ' Секция UI
+2060    SetConfigValue CONFIG_SECTION_UI, "Theme", DEFAULT_THEME
+2070    SetConfigValue CONFIG_SECTION_UI, "ShowStartupForm", "True"
+2080    SetConfigValue CONFIG_SECTION_UI, "DefaultView", "Tree"
+2090
+2100    ' Секция Paths
+2110    SetConfigValue CONFIG_SECTION_PATHS, "LastExportPath", ""
+2120    SetConfigValue CONFIG_SECTION_PATHS, "LastImportPath", ""
+2130    SetConfigValue CONFIG_SECTION_PATHS, "DefaultExportPath", ""
+2140    SetConfigValue CONFIG_SECTION_PATHS, "DefaultImportPath", ""
+2150
+2160    ' Секция Components
+2170    SetConfigValue CONFIG_SECTION_COMPONENTS, "DefaultComponentType", "Module"
+2180    SetConfigValue CONFIG_SECTION_COMPONENTS, "DefaultExportFormat", "Native"
+2190    SetConfigValue CONFIG_SECTION_COMPONENTS, "AutoRenameComponents", "True"
+2200
+2210    Exit Sub
+2220
+2230 ErrorHandler:
+2240    If Not m_ErrorHandler Is Nothing Then
+2250        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".InitDefaultValues", Erl, False
+2260    Else
+2270        Debug.Print "Ошибка в " & MODULE_NAME & ".InitDefaultValues" & ": " & Err.Number & " - " & Err.Description
+2280    End If
+2290    Resume Next
+2300 End Sub
+
+' Загрузка значений из файла конфигурации
+ Private Function LoadConfigValues() As Boolean
+2320    On Error GoTo ErrorHandler
+2330
+2340    ' Чтение файла конфигурации
+2350    Dim iniContent As String
+2360    iniContent = m_FileSystemManager.ReadTextFile(m_ConfigFilePath)
+2370
+2380    If Len(iniContent) = 0 Then
+2390        If Not m_Logger Is Nothing Then
+2400            m_Logger.Log_Warning "Файл конфигурации пуст: " & m_ConfigFilePath, MODULE_NAME
+2410        End If
+2420        LoadConfigValues = False
+2430        Exit Function
+2440    End If
+2450
+2460    ' Очистка словаря значений
+2470    m_ConfigValues.RemoveAll
+2480
+2490    ' Парсинг содержимого INI-файла
+2500    Dim lines() As String
+2510    lines = Split(iniContent, vbCrLf)
+2520
+2530    Dim currentSection As String
+2540    currentSection = ""
+2550
+2560    Dim i As Long
+2570    For i = LBound(lines) To UBound(lines)
+2580        Dim line As String
+2590        line = Trim(lines(i))
+2600
+2610        ' Пропуск пустых строк и комментариев
+2620        If Len(line) > 0 And Left(line, 1) <> ";" Then
+2630            ' Проверка на секцию
+2640            If Left(line, 1) = "[" And Right(line, 1) = "]" Then
+2650                currentSection = Mid(line, 2, Len(line) - 2)
+2660            ' Проверка на пару ключ=значение
+2670            ElseIf InStr(line, "=") > 0 And Len(currentSection) > 0 Then
+2680                Dim parts() As String
+2690                parts = Split(line, "=", 2)
+2700
+2710                Dim Key As String
+2720                Dim Value As String
+2730
+2740                Key = Trim(parts(0))
+2750                Value = Trim(parts(1))
+2760
+2770                ' Добавление значения в словарь
+2780                SetConfigValue currentSection, Key, Value
+2790            End If
+2800        End If
+2810    Next i
+2820
+2830    LoadConfigValues = True
+2840
+2850    Exit Function
+2860
+2870 ErrorHandler:
+2880    If Not m_ErrorHandler Is Nothing Then
+2890        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".LoadConfigValues", Erl, False
+2900    Else
+2910        Debug.Print "Ошибка в " & MODULE_NAME & ".LoadConfigValues" & ": " & Err.Number & " - " & Err.Description
+2920    End If
+2930    LoadConfigValues = False
+2940    Resume Next
+2950 End Function
+
+' Построение содержимого INI-файла из словаря значений
+ Private Function BuildINIContent() As String
+2970    On Error GoTo ErrorHandler
+2980
+2990    Dim content As String
+3000    content = "; Файл конфигурации ExcellentVBA" & vbCrLf
+3010    content = content & "; Автоматически сгенерирован " & Format(Now, "yyyy-mm-dd hh:mm:ss") & vbCrLf & vbCrLf
+3020
+3030    ' Получение всех уникальных секций
+3040    Dim sections As Object
+3050    Set sections = CreateObject("Scripting.Dictionary")
+3060
+3070    Dim Key As Variant
+3080    For Each Key In m_ConfigValues.keys
+3090        Dim Section As String
+3100        Section = Split(Key, ".")(0)
+3110
+3120        If Not sections.Exists(Section) Then
+3130            sections.Add Section, Section
+3140        End If
+3150    Next Key
+3160
+3170    ' Построение содержимого по секциям
+3180    Dim sectionKey As Variant
+3190    For Each sectionKey In sections.keys
+3200        Dim sectionName As String
+3210        sectionName = sectionKey
+3220
+3230        content = content & "[" & sectionName & "]" & vbCrLf
+3240
+3250        ' Добавление всех ключей для данной секции
+3260        For Each Key In m_ConfigValues.keys
+3270            Dim keyParts() As String
+3280            keyParts = Split(Key, ".")
+3290
+3300            If keyParts(0) = sectionName Then
+3310                Dim keyName As String
+3320                keyName = keyParts(1)
+3330
+3340                content = content & keyName & "=" & m_ConfigValues(Key) & vbCrLf
+3350            End If
+3360        Next Key
+3370
+3380        content = content & vbCrLf
+3390    Next sectionKey
+3400
+3410    BuildINIContent = content
+3420
+3430    Exit Function
+3440
+3450 ErrorHandler:
+3460    If Not m_ErrorHandler Is Nothing Then
+3470        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".BuildINIContent", Erl, False
+3480    Else
+3490        Debug.Print "Ошибка в " & MODULE_NAME & ".BuildINIContent" & ": " & Err.Number & " - " & Err.Description
+3500    End If
+3510    BuildINIContent = ""
+3520    Resume Next
+3530 End Function
+
+'-----------------------------------------------------------------------------
+' Методы доступа к значениям конфигурации
+'-----------------------------------------------------------------------------
+
+' Получение значения из конфигурации
+ Public Function GetConfigValue(ByVal Section As String, ByVal Key As String, Optional ByVal DefaultValue As String = "") As String
+3550    On Error GoTo ErrorHandler
+3560
+3570    ' Проверка загрузки конфигурации
+3580    If Not m_IsConfigLoaded Then
+3590        LoadConfig
+3600    End If
+3610
+3620    ' Создание полного ключа
+3630    Dim fullKey As String
+3640    fullKey = Section & "." & Key
+3650
+3660    ' Проверка существования ключа
+3670    If m_ConfigValues.Exists(fullKey) Then
+3680        GetConfigValue = m_ConfigValues(fullKey)
+3690    Else
+3700        ' Если ключ не найден, возвращаем значение по умолчанию
+3710        GetConfigValue = DefaultValue
+3720
+3730        If Not m_Logger Is Nothing Then
+3740            m_Logger.Log_Debug "Конфигурационный ключ не найден: " & fullKey & ". Возвращено значение по умолчанию: " & DefaultValue, MODULE_NAME
+3750        End If
+3760    End If
+3770
+3780    Exit Function
+3790
+3800 ErrorHandler:
+3810    If Not m_ErrorHandler Is Nothing Then
+3820        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".GetConfigValue", Erl, False
+3830    Else
+3840        Debug.Print "Ошибка в " & MODULE_NAME & ".GetConfigValue" & ": " & Err.Number & " - " & Err.Description
+3850    End If
+3860    GetConfigValue = DefaultValue
+3870    Resume Next
+3880 End Function
+
+' Установка значения в конфигурацию
+ Public Function SetConfigValue(ByVal Section As String, ByVal Key As String, ByVal Value As String) As Boolean
+3900    On Error GoTo ErrorHandler
+3910
+3920    ' Создание полного ключа
+3930    Dim fullKey As String
+3940    fullKey = Section & "." & Key
+3950
+3960    ' Добавление или обновление значения в словаре
+3970    If m_ConfigValues.Exists(fullKey) Then
+3980        m_ConfigValues(fullKey) = Value
+3990    Else
+4000        m_ConfigValues.Add fullKey, Value
+4010    End If
+4020
+4030    SetConfigValue = True
+4040
+4050    Exit Function
+4060
+4070 ErrorHandler:
+4080    If Not m_ErrorHandler Is Nothing Then
+4090        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".SetConfigValue", Erl, False
+4100    Else
+4110        Debug.Print "Ошибка в " & MODULE_NAME & ".SetConfigValue" & ": " & Err.Number & " - " & Err.Description
+4120    End If
+4130    SetConfigValue = False
+4140    Resume Next
+4150 End Function
+
+' Получение булевого значения из конфигурации
+ Public Function GetConfigValueBool(ByVal Section As String, ByVal Key As String, Optional ByVal DefaultValue As Boolean = False) As Boolean
+4170    On Error GoTo ErrorHandler
+4180
+4190    Dim strValue As String
+4200    strValue = GetConfigValue(Section, Key, IIf(DefaultValue, "True", "False"))
+4210
+4220    Select Case UCase(strValue)
+                Case "TRUE", "YES", "1", "ON"
+4240            GetConfigValueBool = True
+                Case "FALSE", "NO", "0", "OFF"
+4260            GetConfigValueBool = False
+                Case Else
+4280            GetConfigValueBool = DefaultValue
+4290
+4300            If Not m_Logger Is Nothing Then
+4310                m_Logger.Log_Warning "Некорректное булево значение в конфигурации: " & Section & "." & Key & "=" & strValue & ". Возвращено значение по умолчанию: " & DefaultValue, MODULE_NAME
+4320            End If
+4330    End Select
+4340
+4350    Exit Function
+4360
+4370 ErrorHandler:
+4380    If Not m_ErrorHandler Is Nothing Then
+4390        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".GetConfigValueBool", Erl, False
+4400    Else
+4410        Debug.Print "Ошибка в " & MODULE_NAME & ".GetConfigValueBool" & ": " & Err.Number & " - " & Err.Description
+4420    End If
+4430    GetConfigValueBool = DefaultValue
+4440    Resume Next
+4450 End Function
+
+' Получение числового значения из конфигурации
+ Public Function GetConfigValueNumber(ByVal Section As String, ByVal Key As String, Optional ByVal DefaultValue As Double = 0) As Double
+4470    On Error GoTo ErrorHandler
+4480
+4490    Dim strValue As String
+4500    strValue = GetConfigValue(Section, Key, CStr(DefaultValue))
+4510
+4520    If IsNumeric(strValue) Then
+4530        GetConfigValueNumber = CDbl(strValue)
+4540    Else
+4550        GetConfigValueNumber = DefaultValue
+4560
+4570        If Not m_Logger Is Nothing Then
+4580            m_Logger.Log_Warning "Некорректное числовое значение в конфигурации: " & Section & "." & Key & "=" & strValue & ". Возвращено значение по умолчанию: " & DefaultValue, MODULE_NAME
+4590        End If
+4600    End If
+4610
+4620    Exit Function
+4630
+4640 ErrorHandler:
+4650    If Not m_ErrorHandler Is Nothing Then
+4660        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".GetConfigValueNumber", Erl, False
+4670    Else
+4680        Debug.Print "Ошибка в " & MODULE_NAME & ".GetConfigValueNumber" & ": " & Err.Number & " - " & Err.Description
+4690    End If
+4700    GetConfigValueNumber = DefaultValue
+4710    Resume Next
+4720 End Function
+
+'-----------------------------------------------------------------------------
+' Вспомогательные методы
+'-----------------------------------------------------------------------------
+
+' Проверка существования секции в конфигурации
+ Public Function SectionExists(ByVal Section As String) As Boolean
+4740    On Error GoTo ErrorHandler
+4750
+4760    ' Проверка загрузки конфигурации
+4770    If Not m_IsConfigLoaded Then
+4780        LoadConfig
+4790    End If
+4800
+4810    ' Поиск секции в ключах
+4820    Dim Key As Variant
+4830    For Each Key In m_ConfigValues.keys
+4840        'Dim Section As String
+4850        Section = Split(Key, ".")(0)
+4860
+4870        If Section = Section Then
+4880            SectionExists = True
+4890            Exit Function
+4900        End If
+4910    Next Key
+4920
+4930    SectionExists = False
+4940
+4950    Exit Function
+4960
+4970 ErrorHandler:
+4980    If Not m_ErrorHandler Is Nothing Then
+4990        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".SectionExists", Erl, False
+5000    Else
+5010        Debug.Print "Ошибка в " & MODULE_NAME & ".SectionExists" & ": " & Err.Number & " - " & Err.Description
+5020    End If
+5030    SectionExists = False
+5040    Resume Next
+5050 End Function
+
+' Получение всех ключей в указанной секции
+ Public Function GetSectionKeys(ByVal Section As String) As Collection
+5070    On Error GoTo ErrorHandler
+5080
+5090    Dim result As New Collection
+5100
+5110    ' Проверка загрузки конфигурации
+5120    If Not m_IsConfigLoaded Then
+5130        LoadConfig
+5140    End If
+5150
+5160    ' Поиск всех ключей в указанной секции
+5170    Dim Key As Variant
+5180    For Each Key In m_ConfigValues.keys
+5190        Dim keyParts() As String
+5200        keyParts = Split(Key, ".")
+5210
+5220        If keyParts(0) = Section Then
+5230            On Error Resume Next
+5240            result.Add keyParts(1), keyParts(1)  ' Используем имя ключа как ключ коллекции для избежания дубликатов
+5250            On Error GoTo ErrorHandler
+5260        End If
+5270    Next Key
+5280
+5290    Set GetSectionKeys = result
+5300
+5310    Exit Function
+5320
+5330 ErrorHandler:
+5340    If Not m_ErrorHandler Is Nothing Then
+5350        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".GetSectionKeys", Erl, False
+5360    Else
+5370        Debug.Print "Ошибка в " & MODULE_NAME & ".GetSectionKeys" & ": " & Err.Number & " - " & Err.Description
+5380    End If
+5390    Set GetSectionKeys = New Collection
+5400    Resume Next
+5410 End Function
+
+' Удаление секции из конфигурации
+ Public Function RemoveSection(ByVal Section As String) As Boolean
+5430    On Error GoTo ErrorHandler
+5440
+5450    ' Проверка загрузки конфигурации
+5460    If Not m_IsConfigLoaded Then
+5470        LoadConfig
+5480    End If
+5490
+5500    ' Поиск и удаление всех ключей в указанной секции
+5510    Dim keysToRemove As New Collection
+5520
+5530    Dim Key As Variant
+5540    For Each Key In m_ConfigValues.keys
+5550        Dim keyParts() As String
+5560        keyParts = Split(Key, ".")
+5570
+5580        If keyParts(0) = Section Then
+5590            keysToRemove.Add Key
+5600        End If
+5610    Next Key
+5620
+5630    ' Удаление собранных ключей
+5640    For Each Key In keysToRemove
+5650        m_ConfigValues.Remove Key
+5660    Next Key
+5670
+5680    If Not m_Logger Is Nothing Then
+5690        m_Logger.Log_Info "Удалена секция конфигурации: " & Section & " (" & keysToRemove.Count & " ключей)", MODULE_NAME
+5700    End If
+5710
+5720    RemoveSection = True
+5730
+5740    Exit Function
+5750
+5760 ErrorHandler:
+5770    If Not m_ErrorHandler Is Nothing Then
+5780        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".RemoveSection", Erl, False
+5790    Else
+5800        Debug.Print "Ошибка в " & MODULE_NAME & ".RemoveSection" & ": " & Err.Number & " - " & Err.Description
+5810    End If
+5820    RemoveSection = False
+5830    Resume Next
+5840 End Function
+
+' Инициализация глобальных объектов
+ Private Sub InitGlobals()
+5860    On Error Resume Next
+5870
+5880    ' Инициализация Logger, если еще не инициализирован
+5890    If m_Logger Is Nothing Then
+5900        Set m_Logger = GetLogger()
+5910    End If
+5920
+5930    ' Инициализация ErrorHandler, если еще не инициализирован
+5940    If m_ErrorHandler Is Nothing Then
+5950        Set m_ErrorHandler = GetErrorHandler()
+5960    End If
+5970
+5980    ' Инициализация FileSystemManager, если еще не инициализирован
+5990    If m_FileSystemManager Is Nothing Then
+6000        Set m_FileSystemManager = New FileSystemManager
+6010    End If
+6020 End Sub
+
+' Очистка
+ Private Sub Class_Terminate()
+6040    On Error Resume Next
+6050
+6060    ' Освобождение объектов
+6070    Set m_Logger = Nothing
+6080    Set m_ErrorHandler = Nothing
+6090    Set m_FileSystemManager = Nothing
+6100    Set m_ConfigValues = Nothing
+6110 End Sub

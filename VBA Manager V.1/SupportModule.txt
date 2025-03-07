@@ -1,0 +1,33 @@
+ ' Глобальные экземпляры для Singleton
+
+Public g_ConfigManager As ConfigManager
+Public g_Logger As Logger
+Public g_ErrorHandler As ErrorHandler
+
+' Функция для получения единственного экземпляра Logger
+Public Function GetLogger() As Logger
+    If g_Logger Is Nothing Then
+        Set g_Logger = New Logger
+        ' Здесь можно добавить инициализацию
+    End If
+    Set GetLogger = g_Logger
+End Function
+
+' Функция для получения единственного экземпляра ErrorHandler
+Public Function GetErrorHandler() As ErrorHandler
+    If g_ErrorHandler Is Nothing Then
+        Set g_ErrorHandler = New ErrorHandler
+        ' Здесь можно добавить инициализацию
+    End If
+    Set GetErrorHandler = g_ErrorHandler
+End Function
+
+' Функция для получения единственного экземпляра ErrorHandler
+Public Function GetConfigManager() As ConfigManager
+    If g_ConfigManager Is Nothing Then
+        Set g_ConfigManager = New ConfigManager
+        ' Здесь можно добавить инициализацию
+    End If
+    Set GetConfigManager = g_ConfigManager
+End Function
+

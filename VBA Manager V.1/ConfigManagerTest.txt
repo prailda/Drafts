@@ -1,0 +1,236 @@
+' Модуль тестирования ConfigManager
+Option Explicit
+
+' Глобальные ссылки на основные объекты
+Private m_Logger As Object
+Private m_ErrorHandler As Object
+Private m_ConfigManager As Object
+
+' Тестовые параметры
+Private Const TEST_CONFIG_PATH As String = "C:\Temp\ExcellentVBA_Test\Config\"
+Private Const TEST_CONFIG_FILE As String = "ExcellentVBA_Test.ini"
+
+Sub TestConfigManager()
+10     On Error GoTo ErrorHandler
+20
+30     ' Инициализация
+40     Set m_Logger = GetLogger()
+50     Set m_ErrorHandler = GetErrorHandler()
+60     Set m_ConfigManager = GetConfigManager()
+70
+80     m_Logger.Log_Info "Начало тестирования ConfigManager", "TestConfigManager"
+90
+100    ' Подготовка тестовых данных
+110    PrepareTestData
+120
+130    ' Тестирование базовых операций с конфигурацией
+140    TestConfigBasicOperations
+150
+160    ' Тестирование типизированных методов доступа
+170    TestTypedAccessMethods
+180
+190    ' Тестирование работы с секциями
+200    TestSectionOperations
+210
+220    ' Очистка тестовых данных
+230    CleanupTestData
+240
+250    m_Logger.Log_Success "Тестирование ConfigManager успешно завершено", "TestConfigManager"
+260    MsgBox "Тестирование ConfigManager успешно завершено!", vbInformation, "Тест"
+270
+280    Exit Sub
+290
+300 ErrorHandler:
+310    m_ErrorHandler.HandleError Err.Number, Err.Description, "TestConfigManager", Erl, True
+320
+330    ' Очистка тестовых данных даже при ошибке
+340    CleanupTestData
+350 End Sub
+
+Private Sub PrepareTestData()
+360    On Error GoTo ErrorHandler
+370
+380    m_Logger.Log_Info "Подготовка тестовых данных", "PrepareTestData"
+390
+400    ' Создание тестового каталога, если он не существует
+410    Dim fso As New FileSystemManager
+420
+430    If Not fso.DirectoryExists(TEST_CONFIG_PATH) Then
+440        fso.CreateDirectoryRecursive TEST_CONFIG_PATH
+450    End If
+460
+470    ' Удаление тестового файла конфигурации, если он существует
+480    Dim testConfigFullPath As String
+490    testConfigFullPath = TEST_CONFIG_PATH & TEST_CONFIG_FILE
+500
+510    If fso.FileExists(testConfigFullPath) Then
+520        fso.DeleteFile testConfigFullPath
+530    End If
+540
+550    m_Logger.Log_Info "Тестовые данные подготовлены", "PrepareTestData"
+560
+570    Exit Sub
+580
+590 ErrorHandler:
+600    m_ErrorHandler.HandleError Err.Number, Err.Description, "PrepareTestData", Erl, True
+610    Resume Next
+620 End Sub
+
+Private Sub TestConfigBasicOperations()
+630    On Error GoTo ErrorHandler
+640
+650    m_Logger.Log_Info "Тестирование базовых операций с конфигурацией", "TestConfigBasicOperations"
+660
+670    ' Установка тестового файла конфигурации
+680    Dim testConfigFullPath As String
+690    testConfigFullPath = TEST_CONFIG_PATH & TEST_CONFIG_FILE
+700
+710    ' Тест SaveConfig (создание нового файла конфигурации)
+720    TestAssert "SaveConfig с новым файлом", m_ConfigManager.SaveConfig(testConfigFullPath) = True
+730
+740    ' Проверка существования файла
+750    Dim fso As New FileSystemManager
+760    TestAssert "Файл конфигурации создан", fso.FileExists(testConfigFullPath) = True
+770
+780    ' Задание тестовых значений
+790    TestAssert "SetConfigValue (строка)", m_ConfigManager.SetConfigValue("TestSection", "TestString", "TestValue") = True
+800    TestAssert "SetConfigValue (число)", m_ConfigManager.SetConfigValue("TestSection", "TestNumber", "123.45") = True
+810    TestAssert "SetConfigValue (булево)", m_ConfigManager.SetConfigValue("TestSection", "TestBool", "True") = True
+820
+830    ' Сохранение конфигурации с тестовыми значениями
+840    TestAssert "SaveConfig с тестовыми значениями", m_ConfigManager.SaveConfig() = True
+850
+860    ' Создание нового экземпляра для тестирования загрузки
+870    Set m_ConfigManager = GetConfigManager()
+880
+890    ' Тест LoadConfig
+900    TestAssert "LoadConfig", m_ConfigManager.LoadConfig(testConfigFullPath) = True
+910
+920    ' Чтение и проверка тестовых значений
+930    TestAssert "GetConfigValue (строка)", m_ConfigManager.GetConfigValue("TestSection", "TestString", "") = "TestValue"
+940
+950    m_Logger.Log_Success "Тест базовых операций с конфигурацией выполнен успешно", "TestConfigBasicOperations"
+960
+970    Exit Sub
+980
+990 ErrorHandler:
+1000   m_ErrorHandler.HandleError Err.Number, Err.Description, "TestConfigBasicOperations", Erl, True
+1010   Resume Next
+1020 End Sub
+
+Private Sub TestTypedAccessMethods()
+1030   On Error GoTo ErrorHandler
+1040
+1050   m_Logger.Log_Info "Тестирование типизированных методов доступа", "TestTypedAccessMethods"
+1060
+1070   ' Тестирование булевых значений
+1080   TestAssert "GetConfigValueBool (True)", m_ConfigManager.GetConfigValueBool("TestSection", "TestBool", False) = True
+1090
+1100   ' Тестирование с различными форматами булевых значений
+1110   m_ConfigManager.SetConfigValue "TestSection", "TestBool2", "yes"
+1120   m_ConfigManager.SetConfigValue "TestSection", "TestBool3", "1"
+1130   m_ConfigManager.SetConfigValue "TestSection", "TestBool4", "FALSE"
+1140   m_ConfigManager.SetConfigValue "TestSection", "TestBool5", "no"
+1150
+1160   TestAssert "GetConfigValueBool (yes)", m_ConfigManager.GetConfigValueBool("TestSection", "TestBool2", False) = True
+1170   TestAssert "GetConfigValueBool (1)", m_ConfigManager.GetConfigValueBool("TestSection", "TestBool3", False) = True
+1180   TestAssert "GetConfigValueBool (FALSE)", m_ConfigManager.GetConfigValueBool("TestSection", "TestBool4", True) = False
+1190   TestAssert "GetConfigValueBool (no)", m_ConfigManager.GetConfigValueBool("TestSection", "TestBool5", True) = False
+1200   TestAssert "GetConfigValueBool (несуществующий)", m_ConfigManager.GetConfigValueBool("TestSection", "NonExistentBool", True) = True
+1210
+1220   ' Тестирование числовых значений
+1230   TestAssert "GetConfigValueNumber", Abs(m_ConfigManager.GetConfigValueNumber("TestSection", "TestNumber", 0) - 123.45) < 0.001
+1240
+1250   ' Тестирование с некорректными числовыми значениями
+1260   m_ConfigManager.SetConfigValue "TestSection", "TestInvalidNumber", "not a number"
+1270
+   TestAssert "GetConfigValueNumber (некорректное)", _
+            m_ConfigManager.GetConfigValueNumber("TestSection", "TestInvalidNumber", 999) = 999
+   TestAssert "GetConfigValueNumber (несуществующий)", _
+            m_ConfigManager.GetConfigValueNumber("TestSection", "NonExistentNumber", 888) = 888
+1320
+1330   m_Logger.Log_Success "Тест типизированных методов доступа выполнен успешно", "TestTypedAccessMethods"
+1340
+1350   Exit Sub
+1360
+1370 ErrorHandler:
+1380   m_ErrorHandler.HandleError Err.Number, Err.Description, "TestTypedAccessMethods", Erl, True
+1390   Resume Next
+1400 End Sub
+
+Private Sub TestSectionOperations()
+1410   On Error GoTo ErrorHandler
+1420
+1430   m_Logger.Log_Info "Тестирование работы с секциями", "TestSectionOperations"
+1440
+1450   ' Создание тестовой секции
+1460   m_ConfigManager.SetConfigValue "TestSectionForRemoval", "Key1", "Value1"
+1470   m_ConfigManager.SetConfigValue "TestSectionForRemoval", "Key2", "Value2"
+1480   m_ConfigManager.SetConfigValue "TestSectionForRemoval", "Key3", "Value3"
+1490
+1500   ' Сохранение конфигурации
+1510   m_ConfigManager.SaveConfig
+1520
+1530   ' Проверка существования секции
+1540   TestAssert "SectionExists", m_ConfigManager.SectionExists("TestSectionForRemoval") = True
+1550
+1560   ' Получение ключей секции
+1570   Dim keys As Collection
+1580   Set keys = m_ConfigManager.GetSectionKeys("TestSectionForRemoval")
+1590
+1600   TestAssert "GetSectionKeys (количество)", keys.Count = 3
+1610
+1620   ' Попытка получить ключи для несуществующей секции
+1630   Set keys = m_ConfigManager.GetSectionKeys("NonExistentSection")
+1640
+1650   TestAssert "GetSectionKeys (несуществующая секция)", keys.Count = 0
+1660
+1670   ' Удаление секции
+1680   TestAssert "RemoveSection", m_ConfigManager.RemoveSection("TestSectionForRemoval") = True
+1690
+1700   ' Проверка, что секция действительно удалена
+1710   TestAssert "SectionExists после удаления", m_ConfigManager.SectionExists("TestSectionForRemoval") = False
+1720
+1730   ' Сохранение конфигурации после удаления секции
+1740   m_ConfigManager.SaveConfig
+1750
+1760   m_Logger.Log_Success "Тест работы с секциями выполнен успешно", "TestSectionOperations"
+1770
+1780   Exit Sub
+1790
+1800 ErrorHandler:
+1810   m_ErrorHandler.HandleError Err.Number, Err.Description, "TestSectionOperations", Erl, True
+1820   Resume Next
+1830 End Sub
+
+Private Sub CleanupTestData()
+1840   On Error Resume Next
+1850
+1860   m_Logger.Log_Info "Очистка тестовых данных", "CleanupTestData"
+1870
+1880   ' Удаление тестового файла и каталога
+1890   Dim fso As New FileSystemManager
+1900   Dim testConfigFullPath As String
+1910   testConfigFullPath = TEST_CONFIG_PATH & TEST_CONFIG_FILE
+1920
+1930   If fso.FileExists(testConfigFullPath) Then
+1940       fso.DeleteFile testConfigFullPath
+1950   End If
+1960
+1970   ' В данном случае не удаляем тестовый каталог, чтобы сохранить возможность
+1980   ' проверить файл конфигурации вручную
+1990
+2000   m_Logger.Log_Info "Тестовые данные очищены", "CleanupTestData"
+2010 End Sub
+
+Private Sub TestAssert(ByVal TestName As String, ByVal Condition As Boolean)
+2020   On Error Resume Next
+2030
+2040   If Condition Then
+2050       m_Logger.Log_Debug "ПРОЙДЕН: " & TestName, "TestAssert"
+2060   Else
+2070       m_Logger.Log_Error "НЕ ПРОЙДЕН: " & TestName, "TestAssert"
+2080       Debug.Print "ТЕСТ НЕ ПРОЙДЕН: " & TestName
+2090   End If
+2100 End Sub
+

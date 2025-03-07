@@ -1,0 +1,741 @@
+' Класс Logger
+' Обеспечивает логирование в текстовый файл и окно Immediate Window
+' Конфигурируется через ini-файл
+
+Option Explicit
+
+' Константы
+ Private Const MODULE_NAME As String = Logger
+ Private Const DEFAULT_CONFIG_PATH As String = CUsersdalisAppDataLocalExcellentVBAConfigLoggingVBALoggerConfig.ini
+ Private Const DEFAULT_LOG_PATH As String = CUsersdalisAppDataLocalExcellentVBALogs
+ Private Const DEFAULT_LOG_FILENAME As String = ExcellentLogs.txt
+
+' Перечисление уровней логирования
+ Public Enum LogLevel
+     LogDebug = 0
+     LogInfo = 1
+     LogWarning = 2
+     LogError = 3
+    LogSuccess = 4
+ End Enum
+
+' Singleton экземпляр
+ Private m_Instance As Logger
+
+' Свойства конфигурации
+ Private m_LogsIsEnable As Boolean
+ Private m_LogLevel As LogLevel
+ Private m_LogProviderTextIsEnable As Boolean
+ Private m_LogTextFilePath As String
+ Private m_LogProviderImmediateIsEnable As Boolean
+ Private m_LogBufferSize As Long
+ Private m_LogMaximumFileSize As Long
+ Private m_LogFullFilePath As String
+ Private m_IsLoggerInitialized As Boolean
+
+' Инициализация
+ Private Sub Class_Initialize()
+230     InitLogger
+240 End Sub
+
+' Получение экземпляра (реализация Singleton)
+ Public Function GetInstance() As Logger
+260     If m_Instance Is Nothing Then
+270         Set m_Instance = New Logger
+280     End If
+290     Set GetInstance = m_Instance
+300 End Function
+
+' Методы инициализации
+ Private Sub InitLogger()
+320     On Error GoTo ErrorHandler
+330
+340     ' Установка значений по умолчанию
+350     m_LogsIsEnable = True
+360     m_LogLevel = LogDebug
+370     m_LogProviderTextIsEnable = True
+380     m_LogTextFilePath = DEFAULT_LOG_PATH
+390     m_LogProviderImmediateIsEnable = True
+400     m_LogBufferSize = 500
+410     m_LogMaximumFileSize = 52428800 ' 50 МБ
+420     m_LogFullFilePath = m_LogTextFilePath & DEFAULT_LOG_FILENAME
+430     m_IsLoggerInitialized = False
+440
+450     ' Попытка загрузки конфигурации
+460     LoadConfiguration
+470
+480     ' Инициализация провайдеров
+490     InitializeProviders
+500
+510     ' Запись о готовности логгера
+520     If m_IsLoggerInitialized Then
+530         Log_Info Система логгирования готова к работе
+540     End If
+550
+560     Exit Sub
+570
+580 ErrorHandler
+590     Debug.Print Ошибка при инициализации логгера  & Err.Number &  -  & Err.Description &  в строке  & Erl
+600     Resume Next
+610 End Sub
+
+' Загрузка конфигурации из ini-файла
+ Private Sub LoadConfiguration()
+630     On Error GoTo ErrorHandler
+640
+650     ' Проверка существования файла конфигурации
+660     If Not FileExists(DEFAULT_CONFIG_PATH) Then
+670         ' Создание каталогов и файла конфигурации
+680         CreateDirectoryRecursive GetDirectoryPath(DEFAULT_CONFIG_PATH)
+690         CreateDefaultConfigFile
+700     End If
+710
+720     ' Чтение конфигурации
+730     ReadConfiguration
+740
+750     Exit Sub
+760
+770 ErrorHandler
+780     If m_LogProviderImmediateIsEnable Then
+790         Debug.Print Ошибка при загрузке конфигурации  & Err.Number &  -  & Err.Description &  в строке  & Erl
+800     End If
+810     Resume Next
+820 End Sub
+
+' Инициализация провайдеров логирования
+ Private Sub InitializeProviders()
+840     On Error GoTo ErrorHandler
+850
+860     ' Базовое сообщение об инициализации
+870     If m_LogProviderImmediateIsEnable Then
+880         Debug.Print FormatLogMessage(Инициализация компонентов логгирования, LogInfo)
+890     End If
+900
+910     ' Инициализация текстового провайдера
+920     If m_LogProviderTextIsEnable Then
+930         ' Проверка и создание каталога для логов
+940         If Not DirectoryExists(m_LogTextFilePath) Then
+950             CreateDirectoryRecursive m_LogTextFilePath
+960         End If
+970
+980         ' Проверка доступности файла
+990         If CanWriteToFile(m_LogFullFilePath) Then
+1000            WriteToLogFile Текстовый логгер инициализирован, LogInfo
+1010        Else
+1020            ' Если не удалось получить доступ к файлу, отключаем текстовый провайдер
+1030            m_LogProviderTextIsEnable = False
+1040            If m_LogProviderImmediateIsEnable Then
+1050                Debug.Print FormatLogMessage(Ошибка инициализации текстового логгера. Провайдер отключен., LogError)
+1060            End If
+1070        End If
+1080    End If
+1090
+1100    ' Установка флага инициализации
+1110    m_IsLoggerInitialized = True
+1120
+1130    ' Запись об инициализации в Immediate
+1140    If m_LogProviderImmediateIsEnable Then
+1150        Debug.Print FormatLogMessage(Система логгирования инициализирована, LogInfo)
+1160    End If
+1170
+1180    ' Запись об инициализации в файл
+1190    If m_LogProviderTextIsEnable Then
+1200        WriteToLogFile Система логгирования инициализирована, LogInfo
+1210    End If
+1220
+1230    Exit Sub
+1240
+1250 ErrorHandler
+1260    Debug.Print Ошибка при инициализации провайдеров  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1270    Resume Next
+1280 End Sub
+
+' Методы логирования для различных уровней
+ Public Sub Log_Debug(ByVal Message As String, Optional ByVal Source As String = )
+1300    On Error GoTo ErrorHandler
+1310    Log Message, LogDebug, Source
+1320    Exit Sub
+1330 ErrorHandler
+1340    Debug.Print Ошибка при вызове LogDebug  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1350    Resume Next
+1360 End Sub
+
+ Public Sub Log_Info(ByVal Message As String, Optional ByVal Source As String = )
+1380    On Error GoTo ErrorHandler
+1390    Log Message, LogInfo, Source
+1400    Exit Sub
+1410 ErrorHandler
+1420    Debug.Print Ошибка при вызове LogInfo  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1430    Resume Next
+1440 End Sub
+
+ Public Sub Log_Warning(ByVal Message As String, Optional ByVal Source As String = )
+1460    On Error GoTo ErrorHandler
+1470    Log Message, LogWarning, Source
+1480    Exit Sub
+1490 ErrorHandler
+1500    Debug.Print Ошибка при вызове LogWarning  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1510    Resume Next
+1520 End Sub
+
+ Public Sub Log_Error(ByVal Message As String, Optional ByVal Source As String = )
+1540    On Error GoTo ErrorHandler
+1550    Log Message, LogError, Source
+1560    Exit Sub
+1570 ErrorHandler
+1580    Debug.Print Ошибка при вызове LogError  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1590    Resume Next
+1600 End Sub
+
+ Public Sub Log_Success(ByVal Message As String, Optional ByVal Source As String = )
+1620    On Error GoTo ErrorHandler
+1630    Log Message, LogSuccess, Source
+1640    Exit Sub
+1650 ErrorHandler
+1660    Debug.Print Ошибка при вызове LogSuccess  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1670    Resume Next
+1680 End Sub
+
+' Основной метод логирования
+ Public Sub Log(ByVal Message As String, ByVal Level As LogLevel, Optional ByVal Source As String = )
+1700    On Error GoTo ErrorHandler
+1710
+1720    ' Проверка инициализации
+1730    If Not m_IsLoggerInitialized Then
+1740        Debug.Print ОШИБКА Логгер не инициализирован!
+1750        Exit Sub
+1760    End If
+1770
+1780    ' Проверка уровня логирования
+1790    If Not m_LogsIsEnable Or Level  m_LogLevel Then Exit Sub
+1800
+1810    ' Форматирование сообщения
+1820    Dim formattedMessage As String
+1830    formattedMessage = Message
+1840
+1850    If Len(Source)  0 Then
+1860        formattedMessage = [ & Source & ]  & formattedMessage
+1870    End If
+1880
+1890    ' Логирование в Immediate Window
+1900    If m_LogProviderImmediateIsEnable Then
+1910        Debug.Print FormatLogMessage(formattedMessage, Level)
+1920    End If
+1930
+1940    ' Логирование в файл
+1950    If m_LogProviderTextIsEnable Then
+1960        WriteToLogFile formattedMessage, Level
+1970    End If
+1980
+1990    Exit Sub
+2000
+2010 ErrorHandler
+2020    Debug.Print Ошибка при логировании  & Err.Number &  -  & Err.Description &  в строке  & Erl
+2030    Resume Next
+2040 End Sub
+
+' Форматирование сообщения для вывода
+ Private Function FormatLogMessage(ByVal Message As String, ByVal Level As LogLevel) As String
+2060    On Error GoTo ErrorHandler
+2070
+2080    Dim timeStamp As String
+2090    timeStamp = Format(Now, yyyy-mm-dd hhmmss)
+2100
+2110    Dim levelName As String
+2120    levelName = GetLevelName(Level)
+2130
+2140    FormatLogMessage = timeStamp &  [ & levelName & ]  & Message
+2150
+2160    Exit Function
+2170
+2180 ErrorHandler
+2190    Debug.Print Ошибка при форматировании сообщения  & Err.Number &  -  & Err.Description &  в строке  & Erl
+2200    FormatLogMessage = Format(Now, yyyy-mm-dd hhmmss) &  [ERROR]  & Message
+2210    Resume Next
+2220 End Function
+
+' Получение текстового представления уровня логирования
+ Private Function GetLevelName(ByVal Level As LogLevel) As String
+2240    On Error GoTo ErrorHandler
+2250
+2260    Select Case Level
+                Case LogDebug GetLevelName = DEBUG
+                Case LogInfo GetLevelName = INFO
+                Case LogWarning GetLevelName = WARNING
+                Case LogError GetLevelName = ERROR
+                Case LogSuccess GetLevelName = SUCCESS
+                Case Else GetLevelName = UNKNOWN
+2330    End Select
+2340
+2350    Exit Function
+2360
+2370 ErrorHandler
+2380    Debug.Print Ошибка при получении имени уровня  & Err.Number &  -  & Err.Description &  в строке  & Erl
+2390    GetLevelName = UNKNOWN
+2400    Resume Next
+2410 End Function
+
+' Запись в файл лога
+ Private Sub WriteToLogFile(ByVal Message As String, ByVal Level As LogLevel)
+2430    On Error GoTo ErrorHandler
+2440
+2450    ' Проверка размера файла
+2460    If FileExists(m_LogFullFilePath) Then
+2470        If FileLen(m_LogFullFilePath)  m_LogMaximumFileSize Then
+2480            RotateLogFile
+2490        End If
+2500    End If
+2510
+2520    ' Запись в файл
+2530    Dim fileNum As Integer
+2540    fileNum = FreeFile
+2550
+2560    Open m_LogFullFilePath For Append As #fileNum
+2570        Print #fileNum, FormatLogMessage(Message, Level)
+2580    Close #fileNum
+2590
+2600    Exit Sub
+2610
+2620 ErrorHandler
+2630    Debug.Print Ошибка при записи в файл лога  & Err.Number &  -  & Err.Description &  в строке  & Erl
+2640    ' Отключение текстового провайдера при ошибке
+2650    m_LogProviderTextIsEnable = False
+2660    Resume Next
+2670 End Sub
+
+' Ротация лог-файла при превышении размера
+ Private Sub RotateLogFile()
+2690    On Error GoTo ErrorHandler
+2700
+2710    ' Создание имени архивного файла
+2720    Dim archiveFileName As String
+    archiveFileName = Left(m_LogFullFilePath, Len(m_LogFullFilePath) - 4) & _ & _
+                     Format(Now, yyyymmdd_hhnnss) & .txt
+2750
+2760    ' Закрытие файла перед переименованием
+2770    Close
+2780
+2790    ' Переименование текущего файла
+2800    Name m_LogFullFilePath As archiveFileName
+2810
+2820    ' Создание нового файла
+2830    Dim fileNum As Integer
+2840    fileNum = FreeFile
+2850
+2860    Open m_LogFullFilePath For Output As #fileNum
+2870        Print #fileNum, FormatLogMessage(Начало нового файла логов после ротации, LogInfo)
+2880    Close #fileNum
+2890
+2900    Exit Sub
+2910
+2920 ErrorHandler
+2930    Debug.Print Ошибка при ротации лог-файла  & Err.Number &  -  & Err.Description &  в строке  & Erl
+2940    Resume Next
+2950 End Sub
+
+' Чтение конфигурации из файла
+ Private Sub ReadConfiguration()
+2970    On Error GoTo ErrorHandler
+2980
+2990    ' Проверка существования файла
+3000    If Not FileExists(DEFAULT_CONFIG_PATH) Then Exit Sub
+3010
+3020    ' Чтение параметров
+3030    m_LogsIsEnable = ReadIniValue(DEFAULT_CONFIG_PATH, LoggerConfig, LogsIsEnable, True) = True
+3040
+3050    Dim LevelStr As String
+3060    LevelStr = ReadIniValue(DEFAULT_CONFIG_PATH, LoggerConfig, LogLevels, Debug)
+3070    m_LogLevel = GetLogLevelFromString(LevelStr)
+3080
+3090    m_LogProviderTextIsEnable = ReadIniValue(DEFAULT_CONFIG_PATH, LoggerConfig, LogProviderTextIsEnable, True) = True
+3100    m_LogTextFilePath = ReadIniValue(DEFAULT_CONFIG_PATH, LoggerConfig, LogTextFilePath, DEFAULT_LOG_PATH)
+3110    m_LogProviderImmediateIsEnable = ReadIniValue(DEFAULT_CONFIG_PATH, LoggerConfig, LogProviderImmediateIsEnable, True) = True
+3120
+3130    Dim bufferSizeStr As String
+3140    bufferSizeStr = ReadIniValue(DEFAULT_CONFIG_PATH, LoggerConfig, LogBufferSize, 500)
+3150    m_LogBufferSize = CLng(Val(bufferSizeStr))
+3160
+3170    Dim maxFileSizeStr As String
+3180    maxFileSizeStr = ReadIniValue(DEFAULT_CONFIG_PATH, LoggerConfig, LogMaximumFileSize, 52428800)
+3190    m_LogMaximumFileSize = CLng(Val(maxFileSizeStr))
+3200
+3210    ' Проверка и корректировка пути к файлу логов
+3220    If Right(m_LogTextFilePath, 1)   Then
+3230        m_LogTextFilePath = m_LogTextFilePath & 
+3240    End If
+3250
+3260    ' Формирование полного пути к файлу логов
+3270    m_LogFullFilePath = m_LogTextFilePath & DEFAULT_LOG_FILENAME
+3280
+3290    Exit Sub
+3300
+3310 ErrorHandler
+3320    Debug.Print Ошибка при чтении конфигурации  & Err.Number &  -  & Err.Description &  в строке  & Erl
+3330    ' Возврат к настройкам по умолчанию
+3340    m_LogsIsEnable = True
+3350    m_LogLevel = LogDebug
+3360    m_LogProviderTextIsEnable = True
+3370    m_LogTextFilePath = DEFAULT_LOG_PATH
+3380    m_LogProviderImmediateIsEnable = True
+3390    m_LogBufferSize = 500
+3400    m_LogMaximumFileSize = 52428800
+3410    m_LogFullFilePath = m_LogTextFilePath & DEFAULT_LOG_FILENAME
+3420    Resume Next
+3430 End Sub
+
+' Создание файла конфигурации по умолчанию
+ Private Sub CreateDefaultConfigFile()
+3450    On Error GoTo ErrorHandler
+3460
+3470    Dim fileNum As Integer
+3480    fileNum = FreeFile
+3490
+3500    Open DEFAULT_CONFIG_PATH For Output As #fileNum
+3510        Print #fileNum, [LoggerConfig]
+3520        Print #fileNum, ; Включение логгирования
+3530        Print #fileNum, LogsIsEnable=True
+3540        Print #fileNum, ; Уровень логирования
+3550        Print #fileNum, LogLevels=Debug
+3560        Print #fileNum, ; Включение логов в текстовый файл
+3570        Print #fileNum, LogProviderTextIsEnable=True
+3580        Print #fileNum, ; Путь для текстового файла с логами
+3590        Print #fileNum, LogTextFilePath= & DEFAULT_LOG_PATH
+3600        Print #fileNum, ; Включение логов в окне Immediate
+3610        Print #fileNum, LogProviderImmediateIsEnable=True
+3620        Print #fileNum, ; Максимальный размер буфера логов
+3630        Print #fileNum, LogBufferSize=500
+3640        Print #fileNum, ; Максимальный размер файла с логами (в байтах)
+3650        Print #fileNum, LogMaximumFileSize=52428800
+3660    Close #fileNum
+3670
+3680    Exit Sub
+3690
+3700 ErrorHandler
+3710    Debug.Print Ошибка при создании файла конфигурации  & Err.Number &  -  & Err.Description &  в строке  & Erl
+3720    Resume Next
+3730 End Sub
+
+' Преобразование строки в уровень логирования
+ Private Function GetLogLevelFromString(ByVal LevelStr As String) As LogLevel
+3750    On Error GoTo ErrorHandler
+3760
+3770    Select Case LCase(LevelStr)
+        Case debug GetLogLevelFromString = LogDebug
+        Case info GetLogLevelFromString = LogInfo
+        Case warning GetLogLevelFromString = LogWarning
+        Case error GetLogLevelFromString = LogError
+        Case success GetLogLevelFromString = LogSuccess
+        Case Else GetLogLevelFromString = LogDebug
+3840    End Select
+3850
+3860    Exit Function
+3870
+3880 ErrorHandler
+3890    Debug.Print Ошибка при преобразовании уровня логирования  & Err.Number &  -  & Err.Description &  в строке  & Erl
+3900    GetLogLevelFromString = LogDebug
+3910    Resume Next
+3920 End Function
+
+' Вспомогательные функции
+ Private Function FileExists(ByVal FilePath As String) As Boolean
+3940    On Error GoTo ErrorHandler
+3950
+3960    FileExists = (Dir(FilePath)  )
+3970
+3980    Exit Function
+3990
+4000 ErrorHandler
+4010    Debug.Print Ошибка при проверке существования файла  & Err.Number &  -  & Err.Description &  в строке  & Erl
+4020    FileExists = False
+4030    Resume Next
+4040 End Function
+
+ Private Function DirectoryExists(ByVal DirPath As String) As Boolean
+4060    On Error GoTo ErrorHandler
+4070
+4080    If Right(DirPath, 1) =  Then
+4090        DirectoryExists = (Dir(DirPath, vbDirectory)  )
+4100    Else
+4110        DirectoryExists = (Dir(DirPath & , vbDirectory)  )
+4120    End If
+4130
+4140    Exit Function
+4150
+4160 ErrorHandler
+4170    Debug.Print Ошибка при проверке существования директории  & Err.Number &  -  & Err.Description &  в строке  & Erl
+4180    DirectoryExists = False
+4190    Resume Next
+4200 End Function
+
+ Private Function GetDirectoryPath(ByVal FilePath As String) As String
+4220    On Error GoTo ErrorHandler
+4230
+4240    Dim lastSlash As Long
+4250    lastSlash = InStrRev(FilePath, )
+4260    If lastSlash  0 Then
+4270        GetDirectoryPath = Left(FilePath, lastSlash)
+4280    Else
+4290        GetDirectoryPath = 
+4300    End If
+4310
+4320    Exit Function
+4330
+4340 ErrorHandler
+4350    Debug.Print Ошибка при получении пути директории  & Err.Number &  -  & Err.Description &  в строке  & Erl
+4360    GetDirectoryPath = 
+4370    Resume Next
+4380 End Function
+
+ Private Sub CreateDirectoryRecursive(ByVal DirPath As String)
+4400    On Error GoTo ErrorHandler
+4410
+4420    If DirPath =  Then Exit Sub
+4430    If Right(DirPath, 1)   Then DirPath = DirPath & 
+4440
+4450    ' Если директория уже существует, выходим
+4460    If DirectoryExists(DirPath) Then Exit Sub
+4470
+4480    ' Ищем последнюю существующую директорию в пути
+4490    Dim parentPath As String
+4500    Dim parts() As String
+4510    Dim i As Long
+4520
+4530    parts = Split(DirPath, )
+4540    parentPath = 
+4550
+4560    For i = 0 To UBound(parts) - 1
+4570        If parts(i)   Then
+4580            parentPath = parentPath & parts(i) & 
+4590            If Not DirectoryExists(parentPath) Then
+4600                MkDir parentPath
+4610            End If
+4620        End If
+4630    Next i
+4640
+4650    Exit Sub
+4660
+4670 ErrorHandler
+4680    Debug.Print Ошибка при создании директории  & Err.Number &  -  & Err.Description &  в строке  & Erl
+4690    Resume Next
+4700 End Sub
+
+ Private Function CanWriteToFile(ByVal FilePath As String) As Boolean
+4720    On Error GoTo ErrorHandler
+4730
+4740    Dim fileNum As Integer
+4750    fileNum = FreeFile
+4760
+4770    Open FilePath For Append As #fileNum
+4780    Close #fileNum
+4790    CanWriteToFile = True
+4800
+4810    Exit Function
+4820
+4830 ErrorHandler
+4840    Debug.Print Ошибка при проверке доступа к файлу  & Err.Number &  -  & Err.Description &  в строке  & Erl
+4850    CanWriteToFile = False
+4860    Resume Next
+4870 End Function
+
+ Private Function ReadIniValue(ByVal IniPath As String, ByVal Section As String, _
+                               ByVal Key As String, ByVal DefaultValue As String) As String
+4900    On Error GoTo ErrorHandler
+4910
+4920    Dim fileNum As Integer
+4930    Dim line As String
+4940    Dim currentSection As String
+4950    Dim parts() As String
+4960
+4970    fileNum = FreeFile
+4980
+4990    Open IniPath For Input As #fileNum
+5000
+5010    currentSection = 
+5020
+5030    Do Until EOF(fileNum)
+5040        Line Input #fileNum, line
+5050        line = Trim(line)
+5060
+5070        ' Пропускаем комментарии и пустые строки
+5080        If Left(line, 1)  ; And Len(line)  0 Then
+5090            ' Проверка на секцию
+5100            If Left(line, 1) = [ And Right(line, 1) = ] Then
+5110                currentSection = Mid(line, 2, Len(line) - 2)
+5120            ' Проверка на пару ключ=значение
+5130            ElseIf InStr(line, =)  0 And currentSection = Section Then
+5140                parts = Split(line, =, 2)
+5150                If UCase(Trim(parts(0))) = UCase(Key) Then
+5160                    ReadIniValue = Trim(parts(1))
+5170                    Close #fileNum
+5180                    Exit Function
+5190                End If
+5200            End If
+5210        End If
+5220    Loop
+5230
+5240    Close #fileNum
+5250
+5260    ' Если ключ не найден, возвращаем значение по умолчанию
+5270    ReadIniValue = DefaultValue
+5280
+5290    Exit Function
+5300
+5310 ErrorHandler
+5320    Debug.Print Ошибка при чтении значения из INI  & Err.Number &  -  & Err.Description &  в строке  & Erl
+5330    ReadIniValue = DefaultValue
+5340    Resume Next
+5350 End Function
+
+' Методы для изменения конфигурации
+ Public Sub SetLogLevel(ByVal Level As LogLevel)
+5370    On Error GoTo ErrorHandler
+5380
+5390    m_LogLevel = Level
+5400    Log_Info Установлен уровень логирования  & GetLevelName(Level)
+5410
+5420    Exit Sub
+5430
+5440 ErrorHandler
+5450    Debug.Print Ошибка при установке уровня логирования  & Err.Number &  -  & Err.Description &  в строке  & Erl
+5460    Resume Next
+5470 End Sub
+
+ Public Sub EnableLogging(ByVal Enable As Boolean)
+5490    On Error GoTo ErrorHandler
+5500
+5510    m_LogsIsEnable = Enable
+5520    If Enable Then
+5530        LogInfo Логирование включено
+5540    Else
+5550        Debug.Print FormatLogMessage(Логирование отключено, LogInfo)
+5560    End If
+5570
+5580    Exit Sub
+5590
+5600 ErrorHandler
+5610    Debug.Print Ошибка при изменении статуса логирования  & Err.Number &  -  & Err.Description &  в строке  & Erl
+5620    Resume Next
+5630 End Sub
+
+ Public Sub EnableTextProvider(ByVal Enable As Boolean)
+5650    On Error GoTo ErrorHandler
+5660
+5670    m_LogProviderTextIsEnable = Enable
+5680    If Enable Then
+5690        LogInfo Текстовый провайдер логирования включен
+5700    Else
+5710        LogInfo Текстовый провайдер логирования отключен
+5720    End If
+5730
+5740    Exit Sub
+5750
+5760 ErrorHandler
+5770    Debug.Print Ошибка при изменении статуса текстового провайдера  & Err.Number &  -  & Err.Description &  в строке  & Erl
+5780    Resume Next
+5790 End Sub
+
+ Public Sub EnableImmediateProvider(ByVal Enable As Boolean)
+5810    On Error GoTo ErrorHandler
+5820
+5830    m_LogProviderImmediateIsEnable = Enable
+5840    If Enable Then
+5850        Debug.Print FormatLogMessage(Immediate провайдер логирования включен, LogInfo)
+5860    Else
+5870        If m_LogProviderTextIsEnable Then
+5880            WriteToLogFile Immediate провайдер логирования отключен, LogInfo
+5890        End If
+5900    End If
+5910
+5920    Exit Sub
+5930
+5940 ErrorHandler
+5950    Debug.Print Ошибка при изменении статуса Immediate провайдера  & Err.Number &  -  & Err.Description &  в строке  & Erl
+5960    Resume Next
+5970 End Sub
+
+' Методы для очистки и обслуживания логов
+ Public Sub ClearLogs()
+5990    On Error GoTo ErrorHandler
+6000
+6010    If m_LogProviderTextIsEnable And FileExists(m_LogFullFilePath) Then
+6020        Close ' Закрытие всех открытых файлов
+6030
+6040        ' Создание имени архивного файла
+6050        Dim archiveFileName As String
+        archiveFileName = Left(m_LogFullFilePath, Len(m_LogFullFilePath) - 4) & _ & _
+                         Format(Now, yyyymmdd_hhnnss) & _backup.txt
+6080
+6090        ' Переименование текущего файла
+6100        Name m_LogFullFilePath As archiveFileName
+6110
+6120        ' Создание нового файла
+6130        Dim fileNum As Integer
+6140        fileNum = FreeFile
+6150
+6160        Open m_LogFullFilePath For Output As #fileNum
+6170            Print #fileNum, FormatLogMessage(Файл логов очищен, LogInfo)
+6180        Close #fileNum
+6190
+6200        LogInfo Файл логов очищен. Предыдущие логи сохранены в  & archiveFileName
+6210    End If
+6220
+6230    Exit Sub
+6240
+6250 ErrorHandler
+6260    Debug.Print Ошибка при очистке логов  & Err.Number &  -  & Err.Description &  в строке  & Erl
+6270    Resume Next
+6280 End Sub
+
+ Public Sub CleanOldLogs(Optional ByVal DaysToKeep As Integer = 30)
+6300    On Error GoTo ErrorHandler
+6310
+6320    Dim logDir As String
+6330    logDir = m_LogTextFilePath
+6340
+6350    If Not DirectoryExists(logDir) Then Exit Sub
+6360
+6370    Dim fileName As String
+6380    fileName = Dir(logDir & .txt)
+6390
+6400    Dim cutoffDate As Date
+6410    cutoffDate = DateAdd(d, -DaysToKeep, Date)
+6420
+6430    Dim deletedCount As Integer
+6440    deletedCount = 0
+6450
+6460    LogInfo Начало очистки старых лог-файлов, старше  & DaysToKeep &  дней
+6470
+6480    While Len(fileName)  0
+6490        ' Пропускаем текущий активный файл
+6500        If LCase(fileName)  LCase(DEFAULT_LOG_FILENAME) Then
+6510            Dim FilePath As String
+6520            FilePath = logDir & fileName
+6530
+6540            ' Проверка даты создания файла
+6550            If FileDateTime(FilePath)  cutoffDate Then
+6560                Kill FilePath
+6570                deletedCount = deletedCount + 1
+6580                LogInfo Удален старый лог-файл  & fileName
+6590            End If
+6600        End If
+6610
+6620        fileName = Dir
+6630    Wend
+6640
+6650    LogInfo Завершена очистка старых лог-файлов. Удалено файлов  & deletedCount
+6660
+6670    Exit Sub
+6680
+6690 ErrorHandler
+6700    Debug.Print Ошибка при очистке старых логов  & Err.Number &  -  & Err.Description &  в строке  & Erl
+6710    Resume Next
+6720 End Sub
+
+ Public Property Get IsLoggerInitialized() As Boolean
+6740    IsLoggerInitialized = m_IsLoggerInitialized
+6750 End Property
+
+ Public Property Get LogFilePath() As String
+6770    LogFilePath = m_LogFullFilePath
+6780 End Property
+

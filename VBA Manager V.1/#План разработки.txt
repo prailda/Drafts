@@ -1,0 +1,1941 @@
+Детальный план разработки системы управления VBA-компонентами
+Шаг 1 Сбор и формулирование требований
+Общее назначение системы
+Разработка универсальной системы управления VBA-компонентами, позволяющей осуществлять полный жизненный цикл VBA-объектов от создания до экспортаимпорта, с функциями администрирования, отчетности и централизованного учета в реестре.
+Функциональные требования
+1. Управление компонентами VB
+
+Создание единичных и множественных экземпляров компонентов разными способами
+Копирование и перемещение компонентов между книгами по различным шаблонам
+Переименование и удаление компонентов с подтверждением
+Многоформатный экспорт и импорт компонентов
+Генерация различных типов отчетов по компонентам и процедурам
+Визуализация и управление через древовидную структуру
+Ведение и актуализация реестра компонентов
+
+2. Отказоустойчивость и безопасность
+
+Комплексная обработка ошибок для всех сценариев
+Валидация входных данных
+Логирование всех операций
+Защита от некорректных действий пользователя
+
+Нефункциональные требования
+1. Производительность
+
+Оптимизированная работа с большими объемами данных
+Минимальная нагрузка на систему при работе с реестром
+
+2. Удобство использования
+
+Интуитивно понятный интерфейс через TreeView
+Множество способов выбора компонентов
+Гибкость в настройке и применении
+
+3. Масштабируемость
+
+Универсальность для работы с различными компонентами
+Возможность расширения функциональности
+Работа с закрытыми и открытыми книгами
+
+Шаг 2-4 Декомпозиция задачи
+Этап 1 Фундаментальные компоненты
+Базовые объекты данных
+
+Книга Excel (WorkbookInfo)
+VBA-компонент (VBAComponent)
+Процедура (ProcedureInfo)
+Переменная (VariableInfo)
+Вызов (CallInfo)
+
+Базовые операции
+
+Чтение структуры компонентов VBA
+Парсинг кода VBA
+Валидация имен и параметров
+Чтениезапись файлов
+Работа с Excel API
+
+Этап 2 Эмерджентные компоненты
+Менеджеры и коллекции
+
+Коллекция книг (WorkbooksCollection)
+Коллекция компонентов (ComponentsCollection)
+Коллекция выбранных объектов (SelectionCollection)
+Менеджер файловой системы (FileSystemManager)
+Менеджер VBA-кода (VBACodeManager)
+Обработчик ошибок (ErrorHandler)
+Система логирования (Logger)
+
+Взаимодействия
+
+Реестр → Древовидная структура
+Менеджер компонентов → Операции с компонентами
+Система отчетов → Парсинг компонентов
+Обработчик событий → Актуализация реестра
+
+Этап 3 Архитектурная схема
+Модули приложения
+
+Модуль управления компонентами
+
+Создание, копирование, перемещение, удаление
+Экспортимпорт
+
+
+Модуль визуализации
+
+Древовидная структура
+Табличные представления
+Генерация отчетов
+
+
+Модуль учета и мониторинга
+
+Реестр компонентов
+Обработка событий Excel
+Парсинг компонентов
+
+
+Модуль безопасности
+
+Валидация
+Обработка ошибок
+Логирование
+
+
+Вспомогательный модуль
+
+Файловые операции
+Форматирование
+Конфигурация
+
+
+
+Шаг 5 Выбор архитектурных паттернов
+Паттерны для данного проекта
+
+Singleton (Одиночка)
+
+Для менеджера логирования
+Для центрального реестра компонентов
+Для обработчика ошибок
+
+
+Factory Method (Фабричный метод)
+
+Для создания разных типов компонентов VBA
+Для создания разных типов отчетов
+
+
+Observer (Наблюдатель)
+
+Для отслеживания изменений в книгах Excel
+Для обновления древовидной структуры и реестра
+
+
+Command (Команда)
+
+Для реализации операций с компонентами (создание, копирование и др.)
+Для поддержки отмены операций
+
+
+Strategy (Стратегия)
+
+Для различных стратегий экспортаимпорта
+Для различных стратегий построения отчетов
+
+
+Facade (Фасад)
+
+Для упрощения доступа к сложной функциональности модулей
+Для унификации интерфейса взаимодействия с разными типами компонентов
+
+
+Composite (Компоновщик)
+
+Для организации древовидной структуры
+Для группировки компонентов
+
+
+Adapter (Адаптер)
+
+Для работы с различными типами файлов (.bas, .cls, .frm, .txt)
+Для работы с различными источниками компонентов (книги, файлы, листы)
+
+
+
+Шаг 6 Детальное проектирование ключевых классов и модулей
+1. VBAComponentManager (Основной модуль управления)
+vbaCopy' Модуль управления компонентами VBA
+Option Explicit
+
+' Основной класс для управления компонентами VBA
+Public Class VBAComponentManager
+    ' Свойства
+    Private m_Logger As Logger
+    Private m_ErrorHandler As ErrorHandler
+    Private m_Registry As VBAComponentRegistry
+    
+    ' Методы для создания компонентов
+    Public Function CreateSingleComponent(ByVal TargetWorkbook As Workbook, ByVal ComponentType As VBAComponentType, _
+                                         ByVal ComponentName As String, Optional ByVal Description As String = ) As VBAComponent
+    End Function
+    
+    Public Function CreateMultipleComponents(ByVal TargetWorkbook As Workbook, ByVal ComponentType As VBAComponentType, _
+                                           ByVal Count As Integer) As Collection
+    End Function
+    
+    Public Function CreateComponentsFromTable(ByVal TargetWorkbook As Workbook, _
+                                            ByVal TableSheet As Worksheet) As Collection
+    End Function
+    
+    ' Методы для копирования и перемещения
+    Public Function CopyComponents(ByVal Components As Collection, ByVal TargetWorkbook As Workbook, _
+                                  Optional ByVal RenameOption As Boolean = False) As Boolean
+    End Function
+    
+    Public Function MoveComponents(ByVal Components As Collection, ByVal TargetWorkbooks As Collection, _
+                                  ByVal TransferTemplate As TransferTemplateType, _
+                                  Optional ByVal RenameOption As Boolean = False) As Boolean
+    End Function
+    
+    ' Методы для переименования и удаления
+    Public Function RenameComponents(ByVal Components As Collection, _
+                                   Optional ByVal NewNamesTable As Worksheet = Nothing) As Boolean
+    End Function
+    
+    Public Function DeleteComponents(ByVal Components As Collection) As Boolean
+    End Function
+    
+    ' Методы для экспорта и импорта
+    Public Function ExportComponents(ByVal Components As Collection, ByVal ExportType As ExportOptionType, _
+                                   Optional ByVal TargetPath As String = , _
+                                   Optional ByVal TargetWorkbook As Workbook = Nothing) As Boolean
+    End Function
+    
+    Public Function ImportComponents(ByVal SourceType As ImportSourceType, _
+                                   Optional ByVal SourcePath As String = , _
+                                   Optional ByVal SourceWorkbook As Workbook = Nothing, _
+                                   Optional ByVal SourceSheet As Worksheet = Nothing, _
+                                   Optional ByVal TargetWorkbook As Workbook = Nothing) As Collection
+    End Function
+End Class
+2. VBAComponentRegistry (Реестр компонентов)
+vbaCopy' Модуль учета и мониторинга компонентов VBA
+Option Explicit
+
+' Класс реестра компонентов VBA (Singleton)
+Public Class VBAComponentRegistry
+    ' Singleton экземпляр
+    Private Shared m_Instance As VBAComponentRegistry
+    
+    ' Коллекции
+    Private m_WorkbooksCollection As Collection
+    Private m_ComponentsCollection As Collection
+    
+    ' Свойства
+    Private m_Logger As Logger
+    Private m_ErrorHandler As ErrorHandler
+    
+    ' Получение экземпляра Singleton
+    Public Function GetInstance() As VBAComponentRegistry
+        If m_Instance Is Nothing Then
+            Set m_Instance = New VBAComponentRegistry
+        End If
+        Set GetInstance = m_Instance
+    End Function
+    
+    ' Методы обновления реестра
+    Public Sub RefreshRegistry(Optional ByVal ForceFullRefresh As Boolean = False)
+    End Sub
+    
+    Public Sub HandleWorkbookEvent(ByVal Wb As Workbook, ByVal EventType As WorkbookEventType)
+    End Sub
+    
+    ' Методы доступа к данным
+    Public Function GetWorkbooks() As Collection
+    End Function
+    
+    Public Function GetComponents(Optional ByVal FilterWorkbook As Workbook = Nothing, _
+                                 Optional ByVal FilterType As VBAComponentType = vbaNone) As Collection
+    End Function
+    
+    Public Function FindComponent(ByVal WorkbookName As String, ByVal ComponentName As String) As VBAComponent
+    End Function
+    
+    ' Парсинг компонентов
+    Public Function ParseComponentDetails(ByVal Component As VBAComponent) As ComponentDetails
+    End Function
+End Class
+3. ReportGenerator (Генератор отчетов)
+vbaCopy' Модуль генерации отчетов
+Option Explicit
+
+' Класс генератора отчетов
+Public Class ReportGenerator
+    ' Свойства
+    Private m_Logger As Logger
+    Private m_ErrorHandler As ErrorHandler
+    Private m_Registry As VBAComponentRegistry
+    
+    ' Методы создания отчетов по компонентам
+    Public Function CreateComponentsReport(ByVal Components As Collection, _
+                                        ByVal ReportType As ComponentReportType, _
+                                        Optional ByVal TargetWorkbook As Workbook = Nothing) As Worksheet
+    End Function
+    
+    ' Методы создания отчетов по процедурам
+    Public Function CreateProceduresReport(ByVal Components As Collection, _
+                                         ByVal ReportType As ProcedureReportType, _
+                                         Optional ByVal TargetWorkbook As Workbook = Nothing) As Worksheet
+    End Function
+    
+    ' Вспомогательные методы
+    Private Function ParseComponentCode(ByVal Component As VBAComponent) As Collection
+    End Function
+    
+    Private Function ExtractVariables(ByVal Code As String) As Collection
+    End Function
+    
+    Private Function ExtractCalls(ByVal Code As String) As Collection
+    End Function
+    
+    Private Function MeasureMemory(ByVal Components As Collection) As Long
+    End Function
+End Class
+4. TreeViewController (Контроллер древовидной структуры)
+vbaCopy' Модуль визуализации древовидной структуры
+Option Explicit
+
+' Класс контроллера TreeView
+Public Class TreeViewController
+    ' Свойства
+    Private WithEvents m_TreeView As MSForms.TreeView
+    Private m_Logger As Logger
+    Private m_ErrorHandler As ErrorHandler
+    Private m_Registry As VBAComponentRegistry
+    Private m_SelectedWorkbooks As Collection
+    Private m_SelectedComponents As Collection
+    
+    ' Методы инициализации и обновления
+    Public Sub Initialize(ByRef TreeViewControl As MSForms.TreeView)
+    End Sub
+    
+    Public Sub RefreshTreeView(Optional ByVal ExpandAll As Boolean = False)
+    End Sub
+    
+    ' Обработчики событий
+    Private Sub m_TreeView_NodeCheck(ByVal Node As MSForms.Node)
+    End Sub
+    
+    Private Sub m_TreeView_DblClick(ByVal Node As MSForms.Node)
+    End Sub
+    
+    Private Sub m_TreeView_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)
+    End Sub
+    
+    ' Методы для доступа к выбранным элементам
+    Public Function GetSelectedWorkbooks() As Collection
+    End Function
+    
+    Public Function GetSelectedComponents() As Collection
+    End Function
+    
+    ' Методы для контекстного меню
+    Private Sub ShowContextMenu(ByVal Node As MSForms.Node, ByVal X As Single, ByVal Y As Single)
+    End Sub
+    
+    Public Sub HandleContextMenuAction(ByVal Action As String, ByVal Node As MSForms.Node)
+    End Sub
+End Class
+Шаг 7 Детальное проектирование вспомогательных классов и модулей
+1. Logger (Система логирования)
+vbaCopy' Модуль логирования
+Option Explicit
+
+' Перечисление уровней логирования
+Public Enum LogLevel
+    LogDebug = 0
+    LogInfo = 1
+    LogWarning = 2
+    LogError = 3
+    LogSuccess = 4
+End Enum
+
+' Класс логгера (Singleton)
+Public Class Logger
+    ' Singleton экземпляр
+    Private Shared m_Instance As Logger
+    
+    ' Свойства
+    Private m_LogFile As String
+    Private m_MinLogLevel As LogLevel
+    
+    ' Получение экземпляра Singleton
+    Public Function GetInstance() As Logger
+        If m_Instance Is Nothing Then
+            Set m_Instance = New Logger
+            m_Instance.Initialize
+        End If
+        Set GetInstance = m_Instance
+    End Function
+    
+    ' Инициализация
+    Private Sub Initialize()
+        m_LogFile = GetDefaultLogPath()
+        m_MinLogLevel = LogInfo
+    End Sub
+    
+    ' Методы логирования
+    Public Sub Log(ByVal Message As String, ByVal Level As LogLevel)
+        ' Проверка уровня логирования
+        If Level  m_MinLogLevel Then Exit Sub
+        
+        ' Форматирование записи
+        Dim logEntry As String
+        logEntry = Format(Now, yyyy-mm-dd hhmmss) &  [ & GetLevelName(Level) & ]  & Message
+        
+        ' Запись в файл
+        Dim fnum As Integer
+        fnum = FreeFile
+        On Error Resume Next
+        Open m_LogFile For Append As #fnum
+            Print #fnum, logEntry
+        Close #fnum
+        
+        ' Вывод в отладочное окно
+        Debug.Print logEntry
+    End Sub
+    
+    Public Sub LogDebug(ByVal Message As String)
+        Log Message, LogDebug
+    End Sub
+    
+    Public Sub LogInfo(ByVal Message As String)
+        Log Message, LogInfo
+    End Sub
+    
+    Public Sub LogWarning(ByVal Message As String)
+        Log Message, LogWarning
+    End Sub
+    
+    Public Sub LogError(ByVal Message As String)
+        Log Message, LogError
+    End Sub
+    
+    Public Sub LogSuccess(ByVal Message As String)
+        Log Message, LogSuccess
+    End Sub
+    
+    ' Служебные методы
+    Private Function GetLevelName(ByVal Level As LogLevel) As String
+        Select Case Level
+            Case LogDebug GetLevelName = DEBUG
+            Case LogInfo GetLevelName = INFO
+            Case LogWarning GetLevelName = WARNING
+            Case LogError GetLevelName = ERROR
+            Case LogSuccess GetLevelName = SUCCESS
+            Case Else GetLevelName = UNKNOWN
+        End Select
+    End Function
+    
+    Private Function GetDefaultLogPath() As String
+        ' Формирование пути к лог-файлу в каталоге пользователя
+        GetDefaultLogPath = Environ(USERPROFILE) & DocumentsVBAComponentManager.log
+    End Function
+End Class
+2. ErrorHandler (Обработчик ошибок)
+vbaCopy' Модуль обработки ошибок
+Option Explicit
+
+' Класс обработчика ошибок (Singleton)
+Public Class ErrorHandler
+    ' Singleton экземпляр
+    Private Shared m_Instance As ErrorHandler
+    
+    ' Свойства
+    Private m_Logger As Logger
+    
+    ' Получение экземпляра Singleton
+    Public Function GetInstance() As ErrorHandler
+        If m_Instance Is Nothing Then
+            Set m_Instance = New ErrorHandler
+            Set m_Instance.m_Logger = Logger.GetInstance()
+        End If
+        Set GetInstance = m_Instance
+    End Function
+    
+    ' Обработка ошибок
+    Public Function HandleError(ByVal ErrorNumber As Long, ByVal ErrorDescription As String, _
+                              ByVal Source As String, ByVal LineNumber As Long, _
+                              Optional ByVal ShowUser As Boolean = True) As Boolean
+        ' Формирование сообщения об ошибке
+        Dim errorMsg As String
+        errorMsg = Error # & ErrorNumber &   & ErrorDescription & vbCrLf & _
+                  В модуле  & Source & , строка  & LineNumber
+        
+        ' Логирование ошибки
+        m_Logger.LogError errorMsg
+        
+        ' Показать пользователю, если требуется
+        If ShowUser Then
+            MsgBox errorMsg, vbExclamation, Ошибка
+        End If
+        
+        ' Возвращаем True, если ошибка обработана
+        HandleError = True
+    End Function
+    
+    ' Специальные обработчики типовых ошибок
+    Public Function HandleDuplicateNameError(ByVal ObjectName As String) As DuplicateNameAction
+        ' Предложение пользователю добавить суффикс или пропустить
+        Dim msg As String
+        msg = Объект с именем ' & ObjectName & ' уже существует. & vbCrLf & vbCrLf & _
+              Выберите действие
+        
+        Dim response As VbMsgBoxResult
+        response = MsgBox(msg, vbQuestion + vbYesNoCancel, Дублирование имени)
+        
+        Select Case response
+            Case vbYes
+                HandleDuplicateNameError = DuplicateAddSuffix
+            Case vbNo
+                HandleDuplicateNameError = DuplicateSkip
+            Case Else
+                HandleDuplicateNameError = DuplicateCancel
+        End Select
+    End Function
+    
+    Public Function HandleInvalidNameError(ByVal InvalidName As String) As InvalidNameAction
+        ' Предложение пользователю удалить невалидные символы или указать новое имя
+        Dim msg As String
+        msg = Имя ' & InvalidName & ' содержит недопустимые символы. & vbCrLf & vbCrLf & _
+              Выберите действие
+        
+        Dim response As VbMsgBoxResult
+        response = MsgBox(msg, vbQuestion + vbYesNoCancel, Некорректное имя)
+        
+        Select Case response
+            Case vbYes
+                HandleInvalidNameError = InvalidNameClean
+            Case vbNo
+                HandleInvalidNameError = InvalidNameRename
+            Case Else
+                HandleInvalidNameError = InvalidNameCancel
+        End Select
+    End Function
+End Class
+3. FileSystemManager (Менеджер файловой системы)
+vbaCopy' Модуль работы с файловой системой
+Option Explicit
+
+' Класс для работы с файловой системой
+Public Class FileSystemManager
+    ' Свойства
+    Private m_Logger As Logger
+    Private m_ErrorHandler As ErrorHandler
+    
+    ' Методы для работы с файлами
+    Public Function FileExists(ByVal FilePath As String) As Boolean
+        On Error Resume Next
+        FileExists = (Dir(FilePath)  )
+        On Error GoTo 0
+    End Function
+    
+    Public Function DirectoryExists(ByVal DirPath As String) As Boolean
+        On Error Resume Next
+        DirectoryExists = ((GetAttr(DirPath) And vbDirectory) = vbDirectory)
+        On Error GoTo 0
+    End Function
+    
+    Public Function CreateDirectory(ByVal DirPath As String) As Boolean
+        On Error GoTo ErrorHandler
+        
+        If Not DirectoryExists(DirPath) Then
+            MkDir DirPath
+        End If
+        
+        CreateDirectory = True
+        Exit Function
+        
+ErrorHandler
+        m_ErrorHandler.HandleError Err.Number, Err.Description, FileSystemManager.CreateDirectory, Erl
+        CreateDirectory = False
+    End Function
+    
+    ' Методы для работы с VBA компонентами
+    Public Function ExportVBAComponent(ByVal Component As VBAComponent, ByVal FilePath As String, _
+                                     ByVal ExportFormat As ExportFormatType) As Boolean
+        On Error GoTo ErrorHandler
+        
+        ' Проверка и создание директории при необходимости
+        Dim dirPath As String
+        dirPath = Left(FilePath, InStrRev(FilePath, ) - 1)
+        If Not DirectoryExists(dirPath) Then
+            CreateDirectory dirPath
+        End If
+        
+        ' Экспорт в зависимости от формата
+        Select Case ExportFormat
+            Case ExportFormatNative
+                ' Экспорт в родной формат (.bas, .cls, .frm)
+                Component.Export FilePath
+            Case ExportFormatText
+                ' Экспорт в текстовый файл
+                ExportComponentToText Component, FilePath
+            Case ExportFormatSheet
+                ' Экспорт на лист - требуется другой метод
+                ExportComponentToSheet Component, FilePath
+        End Select
+        
+        ExportVBAComponent = True
+        Exit Function
+        
+ErrorHandler
+        m_ErrorHandler.HandleError Err.Number, Err.Description, FileSystemManager.ExportVBAComponent, Erl
+        ExportVBAComponent = False
+    End Function
+    
+    Public Function ImportVBAComponent(ByVal TargetWorkbook As Workbook, ByVal FilePath As String) As VBAComponent
+        On Error GoTo ErrorHandler
+        
+        Dim vbComp As VBAComponent
+        
+        ' Проверка существования файла
+        If Not FileExists(FilePath) Then
+            m_Logger.LogError Файл не существует  & FilePath
+            Exit Function
+        End If
+        
+        ' Проверка расширения файла
+        Dim fileExt As String
+        fileExt = LCase(Right(FilePath, 4))
+        
+        Select Case fileExt
+            Case .bas, .cls, .frm
+                ' Импорт стандартного файла VBA
+                Set vbComp = TargetWorkbook.VBProject.VBComponents.Import(FilePath)
+            Case .txt
+                ' Импорт из текстового файла - определить тип и создать компонент
+                Set vbComp = ImportComponentFromText(TargetWorkbook, FilePath)
+            Case Else
+                m_Logger.LogError Неподдерживаемый тип файла  & fileExt
+                Exit Function
+        End Select
+        
+        Set ImportVBAComponent = vbComp
+        Exit Function
+        
+ErrorHandler
+        m_ErrorHandler.HandleError Err.Number, Err.Description, FileSystemManager.ImportVBAComponent, Erl
+        Set ImportVBAComponent = Nothing
+    End Function
+    
+    ' Вспомогательные методы
+    Private Sub ExportComponentToText(ByVal Component As VBAComponent, ByVal FilePath As String)
+        ' Код для экспорта компонента в текстовый файл с тегами
+    End Sub
+    
+    Private Sub ExportComponentToSheet(ByVal Component As VBAComponent, ByVal SheetPath As String)
+        ' Код для экспорта компонента на лист
+    End Sub
+    
+    Private Function ImportComponentFromText(ByVal TargetWorkbook As Workbook, ByVal FilePath As String) As VBAComponent
+        ' Код для импорта компонента из текстового файла
+    End Function
+End Class
+4. ComponentParser (Парсер компонентов)
+vbaCopy' Модуль для парсинга VBA кода
+Option Explicit
+
+' Класс парсера кода VBA
+Public Class ComponentParser
+    ' Свойства
+    Private m_Logger As Logger
+    Private m_ErrorHandler As ErrorHandler
+    
+    ' Методы парсинга компонента
+    Public Function ParseComponent(ByVal Component As VBAComponent) As ComponentDetails
+        On Error GoTo ErrorHandler
+        
+        Dim details As New ComponentDetails
+        details.ComponentName = Component.Name
+        details.ComponentType = GetComponentType(Component.Type)
+        
+        ' Получение содержимого компонента
+        Dim codeText As String
+        codeText = GetComponentCode(Component)
+        
+        ' Парсинг описания из комментариев
+        details.Description = ExtractDescription(codeText)
+        
+        ' Парсинг процедур
+        details.Procedures = ExtractProcedures(codeText)
+        
+        ' Парсинг переменных
+        details.Variables = ExtractVariables(codeText)
+        
+        ' Парсинг вызовов
+        details.Calls = ExtractCalls(codeText)
+        
+        Set ParseComponent = details
+        Exit Function
+        
+ErrorHandler
+        m_ErrorHandler.HandleError Err.Number, Err.Description, ComponentParser.ParseComponent, Erl
+        Set ParseComponent = New ComponentDetails
+    End Function
+    
+    ' Методы извлечения информации
+    Private Function GetComponentCode(ByVal Component As VBAComponent) As String
+        ' Получение полного кода компонента
+        Dim codeModule As CodeModule
+        Set codeModule = Component.CodeModule
+        
+        GetComponentCode = codeModule.Lines(1, codeModule.CountOfLines)
+    End Function
+    
+    Private Function ExtractDescription(ByVal CodeText As String) As String
+        ' Извлечение описания из начальных комментариев кода
+    End Function
+    
+    Private Function ExtractProcedures(ByVal CodeText As String) As Collection
+        ' Извлечение всех процедур из кода
+        Dim procedures As New Collection
+        
+        ' Код для определения процедур
+        
+        Set ExtractProcedures = procedures
+    End Function
+    
+    Private Function ExtractVariables(ByVal CodeText As String) As Collection
+        ' Извлечение всех переменных из кода
+        Dim variables As New Collection
+        
+        ' Код для определения переменных
+        
+        Set ExtractVariables = variables
+    End Function
+    
+    Private Function ExtractCalls(ByVal CodeText As String) As Collection
+        ' Извлечение всех вызовов функций из кода
+        Dim calls As New Collection
+        
+        ' Код для определения вызовов
+        
+        Set ExtractCalls = calls
+    End Function
+    
+    ' Вспомогательные методы
+    Private Function GetComponentType(ByVal VBComponentType As Integer) As VBAComponentType
+        ' Преобразование типа компонента VBA в наш перечислимый тип
+        Select Case VBComponentType
+            Case 1 GetComponentType = VBAComponentModule
+            Case 2 GetComponentType = VBAComponentClass
+            Case 3 GetComponentType = VBAComponentForm
+            Case 100 GetComponentType = VBAComponentDocument
+            Case Else GetComponentType = VBAComponentUnknown
+        End Select
+    End Function
+End Class
+Шаг 8 Определение контрактов и интерфейсов взаимодействия
+1. Перечисления и типы данных
+vbaCopy' Перечисления и типы данных
+Option Explicit
+
+' Типы компонентов VBA
+Public Enum VBAComponentType
+    VBAComponentUnknown = 0
+    VBAComponentModule = 1
+    VBAComponentClass = 2
+    VBAComponentForm = 3
+    VBAComponentDocument = 4
+End Enum
+
+' Типы отчетов по компонентам
+Public Enum ComponentReportType
+    ComponentReportList = 1           ' Простой список
+    ComponentReportDetails = 2        ' Детали компонентов
+    ComponentReportProcedures = 3     ' Процедуры в компонентах
+    ComponentReportVariables = 4      ' Переменные в компонентах
+    ComponentReportCalls = 5          ' Вызовы в компонентах
+    ComponentReportContent = 6        ' Содержимое компонентов
+    ComponentReportMemory = 7         ' Использованная память
+End Enum
+
+' Типы отчетов по процедурам
+Public Enum ProcedureReportType
+    ProcedureReportList = 1           ' Список процедур
+    ProcedureReportVariables = 2      ' Переменные в процедурах
+    ProcedureReportCalls = 3          ' Вызовы в процедурах
+End Enum
+
+' Типы экспорта
+Public Enum ExportOptionType
+    ExportSeparateFiles = 1           ' Отдельные файлы (.bas, .cls, .frm)
+    ExportSeparateTextFiles = 2       ' Отдельные текстовые файлы
+    ExportCommonTextFile = 3          ' Общий текстовый файл
+    ExportSeparateSheets = 4          ' Отдельные листы текущей книги
+    ExportCommonSheet = 5             ' Общий лист текущей книги
+    ExportSeparateSheetsNewBook = 6   ' Отдельные листы новой книги
+    ExportCommonSheetNewBook = 7      ' Общий лист новой книги
+End Enum
+
+' Типы импорта
+Public Enum ImportSourceType
+    ImportFromFile = 1                ' Импорт из файла
+    ImportFromTextFile = 2            ' Импорт из текстового файла
+    ImportFromCommonTextFile = 3      ' Импорт из общего текстового файла
+    ImportFromSheet = 4               ' Импорт из листа
+    ImportFromCommonSheet = 5         ' Импорт из общего листа
+End Enum
+
+' Типы шаблонов переноса
+Public Enum TransferTemplateType
+    TransferAllToSeparate = 1         ' Перенос компонентов в разные книги
+    TransferSelectedToOne = 2         ' Перенос выбранных в одну книгу
+    TransferToRepository = 3          ' Перенос в книгу-хранилище
+    TransferByTags = 4                ' Перенос на основе тэгов
+    TransferAllToCurrent = 5          ' Перенос всех в текущую книгу
+End Enum
+
+' Действия при дублировании имени
+Public Enum DuplicateNameAction
+    DuplicateAddSuffix = 1            ' Добавить суффикс
+    DuplicateSkip = 2                 ' Пропустить
+    DuplicateCancel = 3               ' Отменить
+End Enum
+
+' Действия при некорректном имени
+Public Enum InvalidNameAction
+    InvalidNameClean = 1              ' Удалить невалидные символы
+    InvalidNameRename = 2             ' Задать новое имя
+    InvalidNameCancel = 3             ' Отменить
+End Enum
+
+' Типы событий книги
+Public Enum WorkbookEventType
+    WorkbookOpen = 1
+    WorkbookBeforeClose = 2
+    WorkbookBeforeSave = 3
+    WorkbookAfterSave = 4
+End Enum
+
+' Форматы экспорта
+Public Enum ExportFormatType
+    ExportFormatNative = 1            ' Нативный формат (.bas, .cls, .frm)
+    ExportFormatText = 2              ' Текстовый формат
+    ExportFormatSheet = 3             ' Формат листа
+End Enum
+
+' Структура для деталей компонента
+Public Type ComponentDetails
+    ComponentName As String           ' Имя компонента
+    ComponentType As VBAComponentType ' Тип компонента
+    Description As String             ' Описание компонента
+    CreationDate As Date              ' Дата создания
+    ModificationDate As Date          ' Дата изменения
+    Procedures As Collection          ' Коллекция процедур
+    Variables As Collection           ' Коллекция переменных
+    Calls As Collection               ' Коллекция вызовов
+End Type
+
+' Структура для информации о процедуре
+Public Type ProcedureInfo
+    Name As String                    ' Имя процедуры
+    Type As String                    ' Тип (Sub, Function, Property)
+    Parameters As String              ' Параметры
+    ReturnType As String              ' Тип возвращаемого значения (для Function)
+    Code As String                    ' Код процедуры
+    Variables As Collection           ' Локальные переменные
+    Calls As Collection               ' Вызовы в процедуре
+End Type
+
+' Структура для информации о переменной
+Public Type VariableInfo
+    Name As String                    ' Имя переменной
+    Type As String                    ' Тип переменной
+    Scope As String                   ' Область видимости
+    UsageCount As Long                ' Количество использований
+End Type
+
+' Структура для информации о вызове
+Public Type CallInfo
+    CallerName As String              ' Имя вызывающей процедуры
+    CalleeName As String              ' Имя вызываемой процедуры
+    Parameters As String              ' Параметры вызова
+    LineNumber As Long                ' Номер строки
+End Type
+2. Интерфейсы компонентов
+vbaCopy' Интерфейсы компонентов
+Option Explicit
+
+' Интерфейс для работы с компонентами VBA
+Public Interface IVBAComponentProvider
+    ' Методы для доступа к компонентам
+    Function GetComponentsByType(ByVal ComponentType As VBAComponentType) As Collection
+    Function GetComponentByName(ByVal ComponentName As String) As VBAComponent
+    Function GetAllComponents() As Collection
+    
+    ' Методы для создания компонентов
+    Function CreateComponent(ByVal ComponentType As VBAComponentType, ByVal ComponentName As String, _
+                           Optional ByVal Description As String = ) As VBAComponent
+End Interface
+
+' Интерфейс для экспортаимпорта
+Public Interface IVBAComponentExporter
+    ' Методы для экспорта
+    Function ExportToFile(ByVal Component As VBAComponent, ByVal FilePath As String, _
+                         ByVal Format As ExportFormatType) As Boolean
+    Function ExportToSheet(ByVal Component As VBAComponent, ByVal TargetSheet As Worksheet) As Boolean
+    
+    ' Методы для импорта
+    Function ImportFromFile(ByVal FilePath As String) As VBAComponent
+    Function ImportFromSheet(ByVal SourceSheet As Worksheet) As VBAComponent
+End Interface
+
+' Интерфейс для отчетов
+Public Interface IReportProvider
+    ' Методы для создания отчетов
+    Function CreateComponentReport(ByVal ReportType As ComponentReportType) As Worksheet
+    Function CreateProcedureReport(ByVal ReportType As ProcedureReportType) As Worksheet
+    
+    ' Методы для доступа к данным отчетов
+    Function GetComponentsData() As Collection
+    Function GetProceduresData() As Collection
+End Interface
+
+' Интерфейс для реестра
+Public Interface IVBAComponentRegistry
+    ' Методы для работы с реестром
+    Sub RefreshRegistry(Optional ByVal ForceFullRefresh As Boolean = False)
+    Function GetAllRegisteredWorkbooks() As Collection
+    Function GetAllRegisteredComponents() As Collection
+    
+    ' Методы для поиска в реестре
+    Function FindWorkbook(ByVal WorkbookName As String) As Workbook
+    Function FindComponent(ByVal WorkbookName As String, ByVal ComponentName As String) As VBAComponent
+End Interface
+Шаг 9 Планирование механизма обработки ошибок
+Общая стратегия обработки ошибок
+
+Централизованная система обработки ошибок
+
+Singleton-класс ErrorHandler для обработки всех ошибок
+Детальное логирование информации об ошибках
+Унифицированные методы вывода сообщений пользователю
+
+
+Структура обработки ошибок в каждой процедуре
+vbaCopyPublic Function SomeFunction() As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Основной код процедуры
+    ' ...
+    
+    SomeFunction = True
+    Exit Function
+    
+ErrorHandler
+    m_ErrorHandler.HandleError Err.Number, Err.Description, ModuleName.SomeFunction, Erl
+    SomeFunction = False
+End Function
+
+Специализированные обработчики для типовых ошибок
+
+Обработка дублирования имен
+Обработка некорректных имен
+Обработка недоступных файлов
+Обработка недоступных каталогов
+Обработка ошибок кодировки
+
+
+Валидация входных данных
+vbaCopyPrivate Function ValidateComponentName(ByVal Name As String) As Boolean
+    ' Проверка длины имени
+    If Len(Name) = 0 Then
+        m_Logger.LogError Имя компонента не может быть пустым
+        ValidateComponentName = False
+        Exit Function
+    End If
+    
+    ' Проверка допустимых символов
+    If Not IsValidVBAName(Name) Then
+        m_Logger.LogError Имя компонента содержит недопустимые символы  & Name
+        ValidateComponentName = False
+        Exit Function
+    End If
+    
+    ValidateComponentName = True
+End Function
+
+Обработка пользовательских подтверждений
+vbaCopyPrivate Function ConfirmDeletion(ByVal ComponentsCount As Long) As Boolean
+    Dim msg As String
+    msg = Вы собираетесь удалить  & ComponentsCount &  компонент(ов). & vbCrLf & vbCrLf & _
+          Для подтверждения введите слово 'Удалить'
+    
+    Dim response As String
+    response = InputBox(msg, Подтверждение удаления)
+    
+    ConfirmDeletion = (response = Удалить)
+End Function
+
+Автоматические исправления ошибок, где возможно
+vbaCopyPrivate Function CleanInvalidVBAName(ByVal Name As String) As String
+    Dim result As String
+    result = Name
+    
+    ' Удаление недопустимых символов
+    Dim i As Integer
+    For i = 1 To Len(result)
+        If Not IsValidVBANameChar(Mid(result, i, 1)) Then
+            Mid(result, i, 1) = _
+        End If
+    Next i
+    
+    ' Проверка первого символа (должен быть буквой)
+    If Not IsLetter(Left(result, 1)) Then
+        result = m_ & result
+    End If
+    
+    CleanInvalidVBAName = result
+End Function
+
+
+Шаг 10 Определение потенциальных проблем
+Потенциальные проблемы и их решения
+
+Проблема доступа к VBA-проектам
+
+Проблема Отключенный доступ к VBA-проектам в настройках безопасности Excel.
+Решение Проверка доступа при запуске и инструкции по включению доступа.
+
+vbaCopyPrivate Function IsVBAAccessEnabled() As Boolean
+    On Error Resume Next
+    Dim testWB As Workbook
+    Set testWB = ActiveWorkbook
+    If testWB Is Nothing Then Exit Function
+    
+    ' Попытка доступа к VBA-проекту
+    Dim testAccess As Boolean
+    testAccess = (Not testWB.VBProject Is Nothing)
+    
+    If Err.Number  0 Then
+        MsgBox Для работы программы необходимо разрешить доступ к объектной модели VBA. & _
+               vbCrLf & vbCrLf & _
+               Пожалуйста, включите доступ в настройках & vbCrLf & _
+               Файл - Параметры - Центр управления безопасностью -  & _
+               Параметры центра управления безопасностью -  & _
+               Параметры макросов - Доступ к объектной модели VBA, _
+               vbExclamation, Требуется доступ к VBA
+        IsVBAAccessEnabled = False
+    Else
+        IsVBAAccessEnabled = True
+    End If
+    
+    On Error GoTo 0
+End Function
+
+Проблема защищенных паролем VBA-проектов
+
+Проблема Невозможность доступа к защищенным проектам.
+Решение Определение защищенных проектов и информирование пользователя.
+
+vbaCopyPrivate Function IsVBAProjectProtected(ByVal wb As Workbook) As Boolean
+    On Error Resume Next
+    Dim componentCount As Integer
+    componentCount = wb.VBProject.VBComponents.Count
+    
+    If Err.Number  0 Then
+        IsVBAProjectProtected = True
+    Else
+        IsVBAProjectProtected = False
+    End If
+    
+    On Error GoTo 0
+End Function
+
+Проблема при работе с большим количеством компонентов
+
+Проблема Снижение производительности при работе с множеством компонентов.
+Решение Пакетная обработка и прогресс-индикатор.
+
+vbaCopyPrivate Sub ProcessLargeCollection(ByVal items As Collection, ByVal processor As IItemProcessor)
+    Dim totalItems As Long
+    totalItems = items.Count
+    
+    ' Создание и настройка полосы прогресса
+    Dim progressBar As MSForms.UserForm
+    Set progressBar = CreateProgressBar(Обработка..., totalItems)
+    progressBar.Show vbModeless
+    
+    ' Обработка элементов
+    Dim i As Long
+    For i = 1 To totalItems
+        processor.ProcessItem items(i)
+        
+        ' Обновление прогресса каждые 10 элементов
+        If i Mod 10 = 0 Or i = totalItems Then
+            UpdateProgressBar progressBar, i
+            DoEvents
+        End If
+    Next i
+    
+    Unload progressBar
+End Sub
+
+Проблема синхронизации реестра с фактическими компонентами
+
+Проблема Расхождение между реестром и фактическими компонентами при изменениях вне системы.
+Решение Периодическая проверка и актуализация реестра.
+
+vbaCopyPrivate Sub ValidateRegistry()
+    Dim registry As VBAComponentRegistry
+    Set registry = VBAComponentRegistry.GetInstance()
+    
+    ' Проверка книг в реестре
+    Dim wbCollection As Collection
+    Set wbCollection = registry.GetAllRegisteredWorkbooks()
+    
+    Dim wb As Variant
+    For Each wb In wbCollection
+        ' Проверка существования книги
+        If Not WorkbookExists(wb) Then
+            registry.RemoveWorkbook wb
+            m_Logger.LogInfo Книга удалена из реестра  & wb
+        End If
+    Next wb
+    
+    ' Актуализация компонентов для существующих книг
+    registry.RefreshRegistry True
+End Sub
+
+Проблема управления памятью при парсинге больших компонентов
+
+Проблема Высокое потребление памяти при анализе больших модулей.
+Решение Частичный парсинг и управление памятью.
+
+vbaCopyPrivate Function ParseLargeComponent(ByVal Component As VBAComponent) As ComponentDetails
+    ' Получение размера компонента
+    Dim codeSize As Long
+    codeSize = Component.CodeModule.CountOfLines
+    
+    ' Если компонент слишком большой, используем частичный парсинг
+    If codeSize  10000 Then
+        ' Лимитированный парсинг - структура без полного кода
+        Set ParseLargeComponent = ParseComponentStructure(Component)
+    Else
+        ' Стандартный полный парсинг
+        Set ParseLargeComponent = ParseCompleteComponent(Component)
+    End If
+End Function
+
+Проблема конфликтов имен при массовом импортекопировании
+
+Проблема Конфликты имен при массовом импорте компонентов.
+Решение Предварительная проверка и создание карты переименования.
+
+vbaCopyPrivate Function CreateRenameMap(ByVal components As Collection, ByVal targetWB As Workbook) As Dictionary
+    Dim renameMap As New Dictionary
+    
+    Dim comp As VBAComponent
+    For Each comp In components
+        Dim newName As String
+        newName = comp.Name
+        
+        ' Проверка существования компонента с таким именем
+        If ComponentExists(targetWB, newName) Then
+            ' Генерация уникального имени
+            newName = GenerateUniqueName(targetWB, newName)
+            renameMap.Add comp.Name, newName
+        End If
+    Next comp
+    
+    Set CreateRenameMap = renameMap
+End Function
+
+
+Шаг 11 Планирование механизма логирования
+Общая стратегия логирования
+
+Многоуровневая система логирования
+
+Уровни логирования Debug, Info, Warning, Error, Success
+Настраиваемый минимальный уровень логирования
+Отдельные методы для каждого уровня
+
+
+Множественные источники вывода
+
+Запись в файл журнала
+Вывод в отладочное окно (Debug.Print)
+Опциональный вывод на экран для важных событий
+
+
+Форматирование записей
+
+Временные метки
+Индикаторы уровня
+Модулькласспроцедура-источник
+Описательные сообщения
+
+
+Категории логирования
+
+Операции с компонентами (создание, копирование, удаление и т.д.)
+Ошибки и предупреждения
+Информация о производительности
+Действия пользователя
+Системные события
+
+
+
+Реализация механизма логирования
+vbaCopy' Дополнение к классу Logger
+
+' Расширенная инициализация
+Private Sub Initialize()
+    ' Базовая настройка
+    m_LogFile = GetDefaultLogPath()
+    m_MinLogLevel = LogInfo
+    
+    ' Конфигурирование источников вывода
+    m_EnableFileOutput = True
+    m_EnableDebugOutput = True
+    m_EnableScreenOutput = False
+    
+    ' Создание каталога для лога, если нужно
+    Dim logDir As String
+    logDir = Left(m_LogFile, InStrRev(m_LogFile, ) - 1)
+    
+    On Error Resume Next
+    If Len(Dir(logDir, vbDirectory)) = 0 Then
+        MkDir logDir
+    End If
+    On Error GoTo 0
+    
+    ' Запись начальной информации
+    LogInfo === Начало сессии логирования === & vbCrLf & _
+            Версия  & APP_VERSION & vbCrLf & _
+            Датавремя  & Format(Now, yyyy-mm-dd hhmmss) & vbCrLf & _
+            Excel  & Application.Version & vbCrLf & _
+            Пользователь  & Environ(USERNAME)
+End Sub
+
+' Расширенная версия метода Log
+Public Sub Log(ByVal Message As String, ByVal Level As LogLevel, _
+               Optional ByVal Source As String = , _
+               Optional ByVal ForceScreen As Boolean = False)
+    ' Проверка уровня логирования
+    If Level  m_MinLogLevel Then Exit Sub
+    
+    ' Форматирование записи
+    Dim timeStamp As String
+    timeStamp = Format(Now, yyyy-mm-dd hhmmss)
+    
+    Dim levelName As String
+    levelName = GetLevelName(Level)
+    
+    Dim logEntry As String
+    logEntry = timeStamp &  [ & levelName & ]
+    
+    ' Добавление источника, если указан
+    If Len(Source)  0 Then
+        logEntry = logEntry &  [ & Source & ]
+    End If
+    
+    logEntry = logEntry &   & Message
+    
+    ' Запись в файл
+    If m_EnableFileOutput Then
+        WriteToFile logEntry
+    End If
+    
+    ' Вывод в отладочное окно
+    If m_EnableDebugOutput Then
+        Debug.Print logEntry
+    End If
+    
+    ' Вывод на экран для критических сообщений или по запросу
+    If m_EnableScreenOutput Or ForceScreen Then
+        If Level = LogError Then
+            MsgBox logEntry, vbExclamation, Ошибка
+        ElseIf Level = LogWarning Then
+            MsgBox logEntry, vbInformation, Предупреждение
+        ElseIf ForceScreen Then
+            MsgBox logEntry, vbInformation, Информация
+        End If
+    End If
+End Sub
+
+' Метод записи в файл
+Private Sub WriteToFile(ByVal LogEntry As String)
+    On Error Resume Next
+    
+    Dim fnum As Integer
+    fnum = FreeFile
+    
+    Open m_LogFile For Append As #fnum
+        Print #fnum, LogEntry
+    Close #fnum
+    
+    ' Если произошла ошибка при записи, вывести ее в отладочное окно
+    If Err.Number  0 Then
+        Debug.Print Ошибка записи в лог # & Err.Number &  -  & Err.Description
+    End If
+    
+    On Error GoTo 0
+End Sub
+
+' Дополнительные методы логирования с источником
+Public Sub LogDebugEx(ByVal Message As String, ByVal Source As String)
+    Log Message, LogDebug, Source
+End Sub
+
+Public Sub LogInfoEx(ByVal Message As String, ByVal Source As String)
+    Log Message, LogInfo, Source
+End Sub
+
+Public Sub LogWarningEx(ByVal Message As String, ByVal Source As String)
+    Log Message, LogWarning, Source
+End Sub
+
+Public Sub LogErrorEx(ByVal Message As String, ByVal Source As String)
+    Log Message, LogError, Source
+End Sub
+
+Public Sub LogSuccessEx(ByVal Message As String, ByVal Source As String)
+    Log Message, LogSuccess, Source
+End Sub
+
+' Метод настройки уровня логирования
+Public Sub SetLogLevel(ByVal Level As LogLevel)
+    m_MinLogLevel = Level
+    LogInfo Уровень логирования изменен на  & GetLevelName(Level)
+End Sub
+
+' Методы настройки источников вывода
+Public Sub EnableFileOutput(ByVal Enable As Boolean)
+    m_EnableFileOutput = Enable
+End Sub
+
+Public Sub EnableDebugOutput(ByVal Enable As Boolean)
+    m_EnableDebugOutput = Enable
+End Sub
+
+Public Sub EnableScreenOutput(ByVal Enable As Boolean)
+    m_EnableScreenOutput = Enable
+End Sub
+
+' Метод очистки старых логов
+Public Sub CleanOldLogs(Optional ByVal DaysToKeep As Integer = 30)
+    On Error Resume Next
+    
+    Dim logDir As String
+    logDir = Left(m_LogFile, InStrRev(m_LogFile, ) - 1)
+    
+    Dim fileName As String
+    fileName = Dir(logDir & .log)
+    
+    Dim cutoffDate As Date
+    cutoffDate = DateAdd(d, -DaysToKeep, Date)
+    
+    While Len(fileName)  0
+        Dim filePath As String
+        filePath = logDir &  & fileName
+        
+        ' Проверка даты создания файла
+        If FileDateTime(filePath)  cutoffDate Then
+            Kill filePath
+            LogInfo Удален старый лог-файл  & fileName
+        End If
+        
+        fileName = Dir
+    Wend
+    
+    On Error GoTo 0
+End Sub
+Шаг 12 Документирование архитектуры и кода
+Общая архитектурная схема
+Copy                                 +-------------------+
+                                   Пользовательский 
+                                      Интерфейс     
+                                 +--------+----------+
+                                          
+                    +---------------------+----------------------+
+                                                               
+        +-----------v-----------+ +-------v--------+  +---------v---------+
+           Модуль управления         Модуль             Модуль       
+             компонентами         визуализации    учета и мониторинга
+        +-----------+-----------+ +-------+--------+  +---------+---------+
+                                                               
+                                                               
+        +-----------v-----------+ +-------v--------+  +---------v---------+
+           VBAComponentManager    TreeViewController  VBAComponentRegistry 
+        +-----------+-----------+ +-------+--------+  +---------+---------+
+                                                               
+                    +----------+----------+                      
+                                                                
+                    +----------v----------+            +---------v---------+
+                          Модуль                           Модуль       
+                        безопасности     -----------+  вспомогательный  
+                    +----------+----------+            +---------+---------+
+                                                                
+                    +----------v----------+            +---------v---------+
+                    ErrorHandler & Logger             FileSystemManager &
+                    +---------------------+              ComponentParser  
+                                                       +-------------------+
+Логическая схема взаимодействия компонентов
+Copy1. Пользователь ⟶ TreeViewController ⟶ VBAComponentManager ⟶ Операции с компонентами
+   └── ErrorHandler & Logger для обработки ошибок и логирования
+
+2. VBAComponentRegistry ⟶ TreeViewController ⟶ Отображение компонентов
+   └── ComponentParser для анализа структуры компонентов
+
+3. ИмпортЭкспорт VBAComponentManager ⟶ FileSystemManager ⟶ Файловая система
+   └── ErrorHandler для обработки ошибок файловой системы
+
+4. Отчеты ReportGenerator ⟶ ComponentParser ⟶ Анализ кода
+   └── FileSystemManager для сохранения отчетов
+
+5. События Excel ⟶ VBAComponentRegistry ⟶ Обновление реестра
+   └── Logger для записи событий
+Документирование структуры кода
+vbaCopy'==============================================================================
+' Модуль VBAComponentManager
+' Автор [Имя автора]
+' Дата [Дата создания]
+' Версия 1.0
+'
+' Описание
+' Основной модуль управления компонентами VBA. Предоставляет функциональность
+' для создания, копирования, перемещения, переименования, удаления, экспорта
+' и импорта VBA компонентов.
+'
+' История изменений
+' 1.0 - [Дата] - Начальная версия
+'==============================================================================
+Option Explicit
+
+'------------------------------------------------------------------------------
+' Константы
+'------------------------------------------------------------------------------
+Private Const MODULE_NAME As String = VBAComponentManager
+Private Const MAX_COMPONENT_NAME_LENGTH As Integer = 31 ' Максимальная длина имени VBA-компонента
+
+'------------------------------------------------------------------------------
+' Приватные переменные
+'------------------------------------------------------------------------------
+Private m_Logger As Logger            ' Логгер
+Private m_ErrorHandler As ErrorHandler ' Обработчик ошибок
+Private m_Registry As VBAComponentRegistry ' Реестр компонентов
+Private m_FileManager As FileSystemManager ' Менеджер файловой системы
+
+'------------------------------------------------------------------------------
+' Инициализация
+'------------------------------------------------------------------------------
+Private Sub Class_Initialize()
+    ' Инициализация объектов
+    Set m_Logger = Logger.GetInstance()
+    Set m_ErrorHandler = ErrorHandler.GetInstance()
+    Set m_Registry = VBAComponentRegistry.GetInstance()
+    Set m_FileManager = New FileSystemManager
+    
+    m_Logger.LogInfo VBAComponentManager инициализирован, MODULE_NAME
+End Sub
+
+Private Sub Class_Terminate()
+    ' Освобождение ресурсов
+    Set m_Logger = Nothing
+    Set m_ErrorHandler = Nothing
+    Set m_Registry = Nothing
+    Set m_FileManager = Nothing
+End Sub
+
+'------------------------------------------------------------------------------
+' Публичные методы
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' Метод CreateSingleComponent
+' Описание Создает единичный компонент VBA в целевой книге
+'
+' Параметры
+'   TargetWorkbook - Книга, в которой будет создан компонент
+'   ComponentType - Тип создаваемого компонента
+'   ComponentName - Имя создаваемого компонента
+'   Description - Описание компонента (необязательно)
+'
+' Возвращаемое значение
+'   VBAComponent - Созданный компонент или Nothing в случае ошибки
+'------------------------------------------------------------------------------
+Public Function CreateSingleComponent(ByVal TargetWorkbook As Workbook, _
+                                     ByVal ComponentType As VBAComponentType, _
+                                     ByVal ComponentName As String, _
+                                     Optional ByVal Description As String = ) As VBAComponent
+    Const PROCEDURE_NAME As String = CreateSingleComponent
+    On Error GoTo ErrorHandler
+    
+    ' Валидация параметров
+    If TargetWorkbook Is Nothing Then
+        m_Logger.LogError Целевая книга не указана, MODULE_NAME & . & PROCEDURE_NAME
+        Exit Function
+    End If
+    
+    If Not ValidateComponentName(ComponentName) Then
+        m_Logger.LogError Некорректное имя компонента  & ComponentName, MODULE_NAME & . & PROCEDURE_NAME
+        Exit Function
+    End If
+    
+    ' Создание компонента в зависимости от типа
+    Dim vbComp As VBAComponent
+    
+    Select Case ComponentType
+        Case VBAComponentModule
+            ' Создание стандартного модуля
+            Set vbComp = TargetWorkbook.VBProject.VBComponents.Add(vbext_ct_StdModule)
+        Case VBAComponentClass
+            ' Создание класса
+            Set vbComp = TargetWorkbook.VBProject.VBComponents.Add(vbext_ct_ClassModule)
+        Case VBAComponentForm
+            ' Создание формы
+            Set vbComp = TargetWorkbook.VBProject.VBComponents.Add(vbext_ct_MSForm)
+        Case VBAComponentDocument
+            ' Создание модуля документа (это обычно лист или рабочая книга)
+            m_Logger.LogWarning Компоненты типа Document создаются автоматически при создании листа или книги, _
+                              MODULE_NAME & . & PROCEDURE_NAME
+            Exit Function
+        Case Else
+            m_Logger.LogError Неизвестный тип компонента  & ComponentType, MODULE_NAME & . & PROCEDURE_NAME
+            Exit Function
+    End Select
+    
+    ' Установка имени компонента
+    On Error Resume Next
+    vbComp.Name = ComponentName
+    
+    ' Проверка на ошибку при установке имени
+    If Err.Number  0 Then
+        On Error GoTo ErrorHandler
+        
+        ' Обработка ошибки имени компонента
+        Select Case Err.Number
+            Case 32811 ' Дубликат имени
+                Dim action As DuplicateNameAction
+                action = m_ErrorHandler.HandleDuplicateNameError(ComponentName)
+                
+                Select Case action
+                    Case DuplicateAddSuffix
+                        ' Генерация уникального имени с суффиксом
+                        Dim newName As String
+                        newName = GenerateUniqueName(TargetWorkbook, ComponentName)
+                        vbComp.Name = newName
+                        
+                        m_Logger.LogInfo Компонент создан с измененным именем  & newName, _
+                                       MODULE_NAME & . & PROCEDURE_NAME
+                    Case DuplicateSkip
+                        ' Удаляем созданный компонент и выходим
+                        TargetWorkbook.VBProject.VBComponents.Remove vbComp
+                        m_Logger.LogInfo Создание компонента пропущено из-за дубликата имени, _
+                                       MODULE_NAME & . & PROCEDURE_NAME
+                        Exit Function
+                    Case DuplicateCancel
+                        ' Удаляем созданный компонент и выходим
+                        TargetWorkbook.VBProject.VBComponents.Remove vbComp
+                        m_Logger.LogInfo Создание компонента отменено пользователем, _
+                                       MODULE_NAME & . & PROCEDURE_NAME
+                        Exit Function
+                End Select
+            Case Else
+                ' Другие ошибки обрабатываем в общем обработчике
+                On Error GoTo ErrorHandler
+                Err.Raise Err.Number, Err.Source, Err.Description
+        End Select
+    End If
+    
+    On Error GoTo ErrorHandler
+    
+    ' Добавление описания в качестве комментария в начало модуля, если указано
+    If Len(Description)  0 Then
+        AddComponentDescription vbComp, Description
+    End If
+    
+    ' Обновление реестра
+    m_Registry.RefreshRegistry
+    
+    ' Логирование успешного создания
+    m_Logger.LogSuccess Компонент успешно создан  & vbComp.Name &  (Тип  & GetComponentTypeName(ComponentType) & ), _
+                       MODULE_NAME & . & PROCEDURE_NAME
+    
+    ' Возвращаем созданный компонент
+    Set CreateSingleComponent = vbComp
+    Exit Function
+    
+ErrorHandler
+    ' Обработка ошибок
+    m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & . & PROCEDURE_NAME, Erl
+    
+    ' Если компонент был создан, но произошла ошибка, удаляем его
+    If Not vbComp Is Nothing Then
+        On Error Resume Next
+        TargetWorkbook.VBProject.VBComponents.Remove vbComp
+        On Error GoTo 0
+    End If
+    
+    Set CreateSingleComponent = Nothing
+End Function
+
+'------------------------------------------------------------------------------
+' Вспомогательные приватные методы
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' Метод ValidateComponentName
+' Описание Проверяет корректность имени компонента
+'
+' Параметры
+'   Name - Проверяемое имя
+'
+' Возвращаемое значение
+'   Boolean - True, если имя корректно, иначе False
+'------------------------------------------------------------------------------
+Private Function ValidateComponentName(ByVal Name As String) As Boolean
+    ' Проверка длины имени
+    If Len(Name) = 0 Then
+        ValidateComponentName = False
+        Exit Function
+    End If
+    
+    If Len(Name)  MAX_COMPONENT_NAME_LENGTH Then
+        ValidateComponentName = False
+        Exit Function
+    End If
+    
+    ' Проверка на допустимые символы
+    ' Первый символ должен быть буквой
+    If Not IsLetter(Left(Name, 1)) Then
+        ValidateComponentName = False
+        Exit Function
+    End If
+    
+    ' Остальные символы должны быть буквами, цифрами или подчеркиваниями
+    Dim i As Integer
+    For i = 2 To Len(Name)
+        Dim c As String
+        c = Mid(Name, i, 1)
+        
+        If Not (IsLetter(c) Or IsDigit(c) Or c = _) Then
+            ValidateComponentName = False
+            Exit Function
+        End If
+    Next i
+    
+    ValidateComponentName = True
+End Function
+
+'------------------------------------------------------------------------------
+' Метод IsLetter
+' Описание Проверяет, является ли символ буквой
+'
+' Параметры
+'   c - Проверяемый символ
+'
+' Возвращаемое значение
+'   Boolean - True, если символ является буквой, иначе False
+'------------------------------------------------------------------------------
+Private Function IsLetter(ByVal c As String) As Boolean
+    If Len(c)  1 Then
+        IsLetter = False
+        Exit Function
+    End If
+    
+    IsLetter = ((c = A And c = Z) Or (c = a And c = z))
+End Function
+
+'------------------------------------------------------------------------------
+' Метод IsDigit
+' Описание Проверяет, является ли символ цифрой
+'
+' Параметры
+'   c - Проверяемый символ
+'
+' Возвращаемое значение
+'   Boolean - True, если символ является цифрой, иначе False
+'------------------------------------------------------------------------------
+Private Function IsDigit(ByVal c As String) As Boolean
+    If Len(c)  1 Then
+        IsDigit = False
+        Exit Function
+    End If
+    
+    IsDigit = (c = 0 And c = 9)
+End Function
+
+'------------------------------------------------------------------------------
+' Метод GenerateUniqueName
+' Описание Генерирует уникальное имя компонента для указанной книги
+'
+' Параметры
+'   Workbook - Книга, для которой генерируется имя
+'   BaseName - Базовое имя, на основе которого генерируется уникальное
+'
+' Возвращаемое значение
+'   String - Уникальное имя компонента
+'------------------------------------------------------------------------------
+Private Function GenerateUniqueName(ByVal Workbook As Workbook, ByVal BaseName As String) As String
+    Dim result As String
+    result = BaseName
+    
+    Dim counter As Integer
+    counter = 1
+    
+    ' Проверка существования компонента с указанным именем
+    While ComponentExists(Workbook, result)
+        ' Генерация нового имени с суффиксом
+        result = Left(BaseName, MAX_COMPONENT_NAME_LENGTH - Len(CStr(counter)) - 1) & _ & counter
+        counter = counter + 1
+        
+        ' Защита от бесконечного цикла
+        If counter  1000 Then
+            ' Генерация случайного имени
+            result = Module_ & Format(Now, yyyymmddhhnnss) & _ & Int(Rnd  1000)
+            Exit While
+        End If
+    Wend
+    
+    GenerateUniqueName = result
+End Function
+
+'------------------------------------------------------------------------------
+' Метод ComponentExists
+' Описание Проверяет существование компонента с указанным именем в книге
+'
+' Параметры
+'   Workbook - Книга, в которой проверяется наличие компонента
+'   ComponentName - Имя проверяемого компонента
+'
+' Возвращаемое значение
+'   Boolean - True, если компонент существует, иначе False
+'------------------------------------------------------------------------------
+Private Function ComponentExists(ByVal Workbook As Workbook, ByVal ComponentName As String) As Boolean
+    On Error Resume Next
+    
+    Dim vbComp As VBComponent
+    Set vbComp = Workbook.VBProject.VBComponents(ComponentName)
+    
+    ComponentExists = (Not vbComp Is Nothing)
+    
+    On Error GoTo 0
+End Function
+
+'------------------------------------------------------------------------------
+' Метод AddComponentDescription
+' Описание Добавляет описание в виде комментария в начало компонента
+'
+' Параметры
+'   Component - Компонент, в который добавляется описание
+'   Description - Текст описания
+'------------------------------------------------------------------------------
+Private Sub AddComponentDescription(ByVal Component As VBAComponent, ByVal Description As String)
+    On Error Resume Next
+    
+    Dim codeModule As CodeModule
+    Set codeModule = Component.CodeModule
+    
+    ' Форматирование описания как комментария
+    Dim commentLines() As String
+    commentLines = Split(Description, vbCrLf)
+    
+    Dim formattedDescription As String
+    formattedDescription = ' & String(78, =) & vbCrLf
+    formattedDescription = formattedDescription & '  & Component.Name & vbCrLf
+    formattedDescription = formattedDescription & ' & String(78, =) & vbCrLf
+    
+    Dim i As Integer
+    For i = LBound(commentLines) To UBound(commentLines)
+        formattedDescription = formattedDescription & '  & commentLines(i) & vbCrLf
+    Next i
+    
+    formattedDescription = formattedDescription & ' & String(78, =) & vbCrLf & vbCrLf
+    
+    ' Вставка описания в начало модуля
+    codeModule.InsertLines 1, formattedDescription
+    
+    On Error GoTo 0
+End Sub
+
+'------------------------------------------------------------------------------
+' Метод GetComponentTypeName
+' Описание Возвращает текстовое описание типа компонента
+'
+' Параметры
+'   ComponentType - Тип компонента
+'
+' Возвращаемое значение
+'   String - Текстовое описание типа
+'------------------------------------------------------------------------------
+Private Function GetComponentTypeName(ByVal ComponentType As VBAComponentType) As String
+    Select Case ComponentType
+        Case VBAComponentModule
+            GetComponentTypeName = Модуль
+        Case VBAComponentClass
+            GetComponentTypeName = Класс
+        Case VBAComponentForm
+            GetComponentTypeName = Форма
+        Case VBAComponentDocument
+            GetComponentTypeName = Документ
+        Case Else
+            GetComponentTypeName = Неизвестный
+    End Select
+End Function
+Шаг 13-14 Итоговый паспорт проекта и подготовка к реализации
+Паспорт проекта Система управления VBA-компонентами
+Общее описание задачи
+Разработка универсальной системы для управления VBA-компонентами в Excel, включающей функциональность создания, копирования, перемещения, переименования, удаления, экспорта, импорта компонентов, а также создания отчетов и организации компонентов в древовидную структуру с централизованным реестром.
+Декомпозиция задачи
+
+Фундаментальные компоненты
+
+Базовые объекты данных (Книга, VBA-компонент, Процедура, Переменная)
+Базовые операции (Чтениезапись, Парсинг, Валидация)
+
+
+Эмерджентные компоненты
+
+Менеджеры и коллекции (Коллекции книг и компонентов, Менеджеры файловой системы и VBA-кода)
+Системы безопасности (Обработчик ошибок, Логгер)
+
+
+Архитектурная схема
+
+5 основных модулей (Управление компонентами, Визуализация, Учет и мониторинг, Безопасность, Вспомогательный)
+Взаимодействие через интерфейсы
+
+
+
+Выбранные архитектурные паттерны
+
+Singleton - для глобальных сервисов (Logger, ErrorHandler, Registry)
+Factory Method - для создания компонентов и отчетов
+Observer - для отслеживания изменений в книгах
+Command - для операций с компонентами
+Strategy - для экспортаимпорта и отчетов
+Facade - для упрощения интерфейсов
+Composite - для древовидной структуры
+Adapter - для работы с различными типами файлов
+
+Ключевые классы и модули
+
+VBAComponentManager - управление компонентами
+VBAComponentRegistry - реестр компонентов
+ReportGenerator - генерация отчетов
+TreeViewController - управление древовидной структурой
+Logger - система логирования
+ErrorHandler - обработка ошибок
+FileSystemManager - работа с файловой системой
+ComponentParser - парсинг компонентов
+
+Вспомогательные классы и модули
+
+ValidationUtils - утилиты валидации
+FormatUtils - утилиты форматирования
+ConfigManager - управление конфигурацией
+ExcelEventHandler - обработка событий Excel
+
+Контракты и интерфейсы
+
+IVBAComponentProvider - доступ к компонентам
+IVBAComponentExporter - экспортимпорт
+IReportProvider - создание отчетов
+IVBAComponentRegistry - доступ к реестру
+
+Механизмы безопасности
+
+Обработка ошибок
+
+Централизованный ErrorHandler
+Специальные обработчики типовых ошибок
+Автоматическое восстановление и предложения по решению
+
+
+Валидация
+
+Проверка входных данных
+Валидация имен компонентов
+Проверка существования файлов и каталогов
+
+
+Логирование
+
+Многоуровневая система (Debug, Info, Warning, Error, Success)
+Множественные источники вывода
+Детальная информация о событиях
+
+
+
+Потенциальные проблемы и решения
+
+Проблемы доступа к VBA-проектам - проверка и инструкции
+Защищенные паролем проекты - выявление и информирование
+Большое количество компонентов - пакетная обработка
+Синхронизация реестра - автоматическая проверка
+Парсинг больших компонентов - частичный анализ
+Конфликты имен - предварительная проверка
+
+План работ
+Этап 1 Базовая инфраструктура (2-3 дня)
+
+Создание базовых классов безопасности (Logger, ErrorHandler)
+Разработка валидации и вспомогательных утилит
+Настройка проекта и базовой структуры
+
+Этап 2 Ядро системы (5-7 дней)
+
+Разработка VBAComponentRegistry
+Реализация FileSystemManager
+Создание ComponentParser
+Интеграция компонентов
+
+Этап 3 Основной функционал (10-14 дней)
+
+Разработка VBAComponentManager и всех операций
+Создание ReportGenerator
+Реализация TreeViewController
+Тестирование каждого компонента
+
+Этап 4 Интеграция и оптимизация (5-7 дней)
+
+Интеграция всех компонентов
+Оптимизация производительности
+Тестирование на реальных данных
+Рефакторинг и улучшения
+
+Этап 5 Финализация (3-5 дней)
+
+Комплексное тестирование
+Документирование
+Подготовка к развертыванию
+Инструкции по использованию
+
+Прототипы и интеграция
+Для дальнейшего развития проекта будут разработаны прототипы ключевых компонентов
+
+Базовый функционал логирования и обработки ошибок
+Прототип реестра компонентов
+Прототип управления компонентами
+Прототип древовидной структуры
+
+Интеграция будет проводиться постепенно, с проверкой взаимодействия между компонентами на каждом этапе.
+Тестирование и оптимизация
+Будут разработаны тестовые сценарии для каждого компонента и всей системы. Оптимизация будет направлена на
+
+Сокращение времени операций с большим количеством компонентов
+Улучшение параллельной работы с Excel
+Минимизацию потребления памяти
+Повышение отказоустойчивости
+
+Выводы
+Система управления VBA-компонентами представляет собой сложный, но хорошо структурированный проект, построенный на современных принципах проектирования. Она решает всестороннюю задачу управления VBA-кодом в Excel, предоставляя полный набор инструментов для администрирования, анализа и организации компонентов.
+Выбранная архитектура обеспечивает модульность, расширяемость и устойчивость системы. Применение паттернов проектирования и механизмов безопасности гарантирует надежное функционирование во всех сценариях использования.

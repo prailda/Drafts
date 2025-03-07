@@ -1,0 +1,381 @@
+' Класс ErrorHandler
+' Обеспечивает централизованную обработку ошибок приложения
+' Работает в паре с классом Logger
+
+Option Explicit
+
+' Константы
+Private Const MODULE_NAME As String = ErrorHandler
+
+' Типы действий при дублировании имени
+Public Enum DuplicateNameAction
+    DuplicateAddSuffix = 1    ' Добавить суффикс
+    DuplicateSkip = 2         ' Пропустить
+    DuplicateCancel = 3       ' Отменить операцию
+End Enum
+
+' Типы действий при некорректном имени
+Public Enum InvalidNameAction
+    InvalidNameClean = 1      ' Очистить недопустимые символы
+     InvalidNameRename = 2     ' Задать новое имя
+    InvalidNameCancel = 3     ' Отменить операцию
+End Enum
+
+' Singleton экземпляр
+ Private m_Instance As ErrorHandler
+
+' Свойства
+ Private m_Logger As Logger
+ Private m_ShowErrors As Boolean
+ Private m_LogErrors As Boolean
+ Private m_DetailedErrorInfo As Boolean
+
+' Инициализация
+Private Sub Class_Initialize()
+180         Set m_Logger = GetLogger()
+190     m_ShowErrors = True
+200     m_LogErrors = True
+210     m_DetailedErrorInfo = True
+220
+230     If m_Logger.IsLoggerInitialized Then
+240         m_Logger.Log_Info ErrorHandler инициализирован, MODULE_NAME
+250     Else
+260         Debug.Print ВНИМАНИЕ Logger не инициализирован при инициализации ErrorHandler
+270     End If
+280 End Sub
+
+' Получение экземпляра (реализация Singleton)
+Public Function GetInstance() As ErrorHandler
+300     If m_Instance Is Nothing Then
+310         Set m_Instance = New ErrorHandler
+320     End If
+330     Set GetInstance = m_Instance
+340 End Function
+
+' Основной метод обработки ошибок
+ Public Function HandleError(ByVal ErrorNumber As Long, ByVal ErrorDescription As String, _
+                           ByVal Source As String, ByVal LineNumber As Long, _
+                           Optional ByVal ShowUser As Boolean = True, _
+                           Optional ByVal AdditionalInfo As String = ) As Boolean
+390     On Error Resume Next
+400
+410     ' Формирование сообщения об ошибке
+420     Dim errorMsg As String
+430     Dim detailedMsg As String
+440
+450     ' Основное сообщение
+460     errorMsg = Ошибка # & ErrorNumber &   & ErrorDescription
+470
+480     ' Добавление источника и номера строки
+490     If Len(Source)  0 Then
+500         errorMsg = errorMsg & vbCrLf & В модуле  & Source
+510     End If
+520
+530     If LineNumber  0 Then
+540         errorMsg = errorMsg & , строка  & LineNumber
+550     End If
+560
+570     ' Добавление дополнительной информации
+580     If Len(AdditionalInfo)  0 Then
+590         errorMsg = errorMsg & vbCrLf & Дополнительная информация  & AdditionalInfo
+600     End If
+610
+620     ' Детализированное сообщение для логов
+630     If m_DetailedErrorInfo Then
+            detailedMsg = errorMsg & vbCrLf & _
+                       Время  & Now & vbCrLf & _
+                       Пользователь  & Environ(USERNAME) & vbCrLf & _
+                       Компьютер  & Environ(COMPUTERNAME) & vbCrLf & _
+                       Excel версия  & Application.Version
+690     Else
+700         detailedMsg = errorMsg
+710     End If
+720
+730     ' Логирование ошибки
+740     If m_LogErrors And m_Logger.IsLoggerInitialized Then
+750         m_Logger.Log_Error detailedMsg, IIf(Len(Source)  0, Source, MODULE_NAME)
+760     End If
+770
+780     ' Вывод сообщения пользователю
+790     If m_ShowErrors And ShowUser Then
+800         MsgBox errorMsg, vbExclamation + vbOKOnly, Ошибка приложения
+810     End If
+820
+830     ' Успешная обработка
+840     HandleError = True
+850 End Function
+
+' Специальные обработчики типовых ошибок
+ Public Function HandleDuplicateNameError(ByVal ObjectName As String, Optional ByVal ObjectType As String = объект) As DuplicateNameAction
+870     On Error GoTo ErrorHandler
+880
+890     ' Логирование ошибки дублирования имени
+900     If m_Logger.IsLoggerInitialized Then
+910         m_Logger.Log_Warning Объект с именем ' & ObjectName & ' уже существует, MODULE_NAME
+920     End If
+930
+940     If Not m_ShowErrors Then
+950         HandleDuplicateNameError = DuplicateAddSuffix
+960         Exit Function
+970     End If
+980
+990     ' Предложение пользователю выбрать действие
+1000    Dim msg As String
+              msg = ObjectType &  с именем ' & ObjectName & ' уже существует. & vbCrLf & vbCrLf & _
+                    Выберите действие & vbCrLf & _
+                    - [Да] Добавить суффикс к имени & vbCrLf & _
+                    - [Нет] Пропустить этот объект & vbCrLf & _
+                    - [Отмена] Отменить операцию
+
+1070    Dim response As VbMsgBoxResult
+1080    response = MsgBox(msg, vbQuestion + vbYesNoCancel, Дублирование имени)
+1090
+1100    Select Case response
+            Case vbYes
+1120            HandleDuplicateNameError = DuplicateAddSuffix
+            Case vbNo
+1140            HandleDuplicateNameError = DuplicateSkip
+            Case Else
+1160            HandleDuplicateNameError = DuplicateCancel
+1170    End Select
+1180
+1190    Exit Function
+1200
+1210 ErrorHandler
+1220    Debug.Print Ошибка при обработке дублирования имени  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1230    HandleDuplicateNameError = DuplicateCancel
+1240    Resume Next
+1250 End Function
+
+ Public Function HandleInvalidNameError(ByVal InvalidName As String, Optional ByVal ObjectType As String = объект) As InvalidNameAction
+1270    On Error GoTo ErrorHandler
+1280
+1290    ' Логирование ошибки некорректного имени
+1300    If m_Logger.IsLoggerInitialized Then
+1310        m_Logger.Log_Warning Некорректное имя ' & InvalidName & ' содержит недопустимые символы, MODULE_NAME
+1320    End If
+1330
+1340    If Not m_ShowErrors Then
+1350        HandleInvalidNameError = InvalidNameClean
+1360        Exit Function
+1370    End If
+1380
+1390    ' Предложение пользователю выбрать действие
+1400    Dim msg As String
+    msg = Имя  & ObjectType &  ' & InvalidName & ' содержит недопустимые символы. & vbCrLf & vbCrLf & _
+          Выберите действие & vbCrLf & _
+          - [Да] Автоматически удалить недопустимые символы & vbCrLf & _
+          - [Нет] Задать новое имя вручную & vbCrLf & _
+          - [Отмена] Отменить операцию
+
+1470    Dim response As VbMsgBoxResult
+1480    response = MsgBox(msg, vbQuestion + vbYesNoCancel, Некорректное имя)
+1490
+1500    Select Case response
+            Case vbYes
+1520            HandleInvalidNameError = InvalidNameClean
+            Case vbNo
+1540            HandleInvalidNameError = InvalidNameRename
+            Case Else
+1560            HandleInvalidNameError = InvalidNameCancel
+1570    End Select
+1580
+1590    Exit Function
+1600
+1610 ErrorHandler
+1620    Debug.Print Ошибка при обработке некорректного имени  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1630    HandleInvalidNameError = InvalidNameCancel
+1640    Resume Next
+1650 End Function
+
+ Public Function HandleFileAccessError(ByVal FilePath As String, Optional ByVal Operation As String = доступ к) As Boolean
+1670    On Error GoTo ErrorHandler
+1680
+1690    ' Логирование ошибки доступа к файлу
+1700    If m_Logger.IsLoggerInitialized Then
+1710        m_Logger.Log_Error Ошибка при  & Operation &  файлу  & FilePath, MODULE_NAME
+1720    End If
+1730
+1740    If Not m_ShowErrors Then
+1750        HandleFileAccessError = False
+1760        Exit Function
+1770    End If
+1780
+1790    ' Предложение пользователю выбрать действие
+1800    Dim msg As String
+                msg = Ошибка при  & Operation &  файлу & vbCrLf & FilePath & vbCrLf & vbCrLf & _
+                      Возможные причины & vbCrLf & _
+                      - Файл не существует & vbCrLf & _
+                      - Недостаточно прав доступа & vbCrLf & _
+                      - Файл используется другим процессом & vbCrLf & vbCrLf & _
+                      Продолжить выполнение операции
+1870
+1880    Dim response As VbMsgBoxResult
+1890    response = MsgBox(msg, vbQuestion + vbYesNo, Ошибка доступа к файлу)
+1900
+1910    HandleFileAccessError = (response = vbYes)
+1920
+1930    Exit Function
+1940
+1950 ErrorHandler
+1960    Debug.Print Ошибка при обработке ошибки доступа к файлу  & Err.Number &  -  & Err.Description &  в строке  & Erl
+1970    HandleFileAccessError = False
+1980    Resume Next
+1990 End Function
+
+ Public Function HandleVBAAccessError() As Boolean
+2010    On Error GoTo ErrorHandler
+2020
+2030    ' Логирование ошибки доступа к VBA
+2040    If m_Logger.IsLoggerInitialized Then
+2050        m_Logger.LogError Ошибка доступа к объектной модели VBA. Необходимо включить доступ в настройках безопасности., MODULE_NAME
+2060    End If
+2070
+2080    If Not m_ShowErrors Then
+2090        HandleVBAAccessError = False
+2100        Exit Function
+2110    End If
+2120
+2130    ' Вывод инструкций пользователю
+2140    Dim msg As String
+              msg = Для работы программы необходимо разрешить доступ к объектной модели VBA. & vbCrLf & vbCrLf & _
+                    Для этого выполните следующие действия & vbCrLf & _
+                    1. Закройте это окно & vbCrLf & _
+                    2. Откройте меню Файл - Параметры & vbCrLf & _
+                    3. Перейдите в раздел Центр управления безопасностью & vbCrLf & _
+                    4. Нажмите кнопку Параметры центра управления безопасностью & vbCrLf & _
+                    5. Перейдите в раздел Параметры макросов & vbCrLf & _
+                    6. Установите флажок Доступ к объектной модели VBA & vbCrLf & _
+                    7. Нажмите ОК и перезапустите приложение & vbCrLf & vbCrLf & _
+                    Хотите открыть настройки безопасности сейчас
+2250
+2260    Dim response As VbMsgBoxResult
+2270    response = MsgBox(msg, vbQuestion + vbYesNo, Ошибка доступа к VBA)
+2280
+2290    If response = vbYes Then
+2300        ' Открытие диалога настроек безопасности
+2310        On Error Resume Next
+2320        Application.CommandBars.ExecuteMso SecurityOptions
+2330        On Error GoTo ErrorHandler
+2340    End If
+2350
+2360    HandleVBAAccessError = False
+2370
+2380    Exit Function
+2390
+2400 ErrorHandler
+2410    Debug.Print Ошибка при обработке ошибки доступа к VBA  & Err.Number &  -  & Err.Description &  в строке  & Erl
+2420    HandleVBAAccessError = False
+2430    Resume Next
+2440 End Function
+
+' Получение контекстной информации
+ Public Function GetCallStack() As String
+2460    On Error GoTo ErrorHandler
+2470
+2480    ' В VBA нет прямого способа получить стек вызовов,
+2490    ' поэтому эта функция может использоваться для ручного формирования стека
+2500    ' разработчиками системы
+2510    GetCallStack = Функционал получения стека вызовов недоступен в VBA
+2520
+2530    Exit Function
+2540
+2550 ErrorHandler
+2560    Debug.Print Ошибка при получении стека вызовов  & Err.Number &  -  & Err.Description &  в строке  & Erl
+2570    GetCallStack = Ошибка при получении стека вызовов
+2580    Resume Next
+2590 End Function
+
+' Проверка доступа к VBA
+ Public Function IsVBAAccessEnabled() As Boolean
+2610    On Error Resume Next
+2620
+2630    Dim testWB As Workbook
+2640    Set testWB = ActiveWorkbook
+2650    If testWB Is Nothing Then
+2660        Set testWB = Workbooks.Add
+2670        testWB.Close SaveChanges=False
+2680        IsVBAAccessEnabled = False
+2690        Exit Function
+2700    End If
+2710
+2720    ' Попытка доступа к VBA-проекту
+2730    Dim testAccess As Boolean
+2740    testAccess = (Not testWB.VBProject Is Nothing)
+2750
+2760    If Err.Number  0 Then
+2770        IsVBAAccessEnabled = False
+2780    Else
+2790        IsVBAAccessEnabled = True
+2800    End If
+2810
+2820    On Error GoTo 0
+2830 End Function
+
+' Настройка параметров обработчика ошибок
+ Public Sub Configure(Optional ByVal ShowErrors As Variant, Optional ByVal LogErrors As Variant, _
+                      Optional ByVal DetailedErrorInfo As Variant)
+2860    On Error GoTo ErrorHandler
+2870
+2880    ' Обновление параметров, если они переданы
+2890    If Not IsMissing(ShowErrors) Then
+2900        m_ShowErrors = CBool(ShowErrors)
+2910    End If
+2920
+2930    If Not IsMissing(LogErrors) Then
+2940        m_LogErrors = CBool(LogErrors)
+2950    End If
+2960
+2970    If Not IsMissing(DetailedErrorInfo) Then
+2980        m_DetailedErrorInfo = CBool(DetailedErrorInfo)
+2990    End If
+3000
+3010    ' Логирование изменений
+3020    If m_Logger.IsLoggerInitialized Then
+                m_Logger.LogInfo Конфигурация ErrorHandler обновлена  & _
+                        ShowErrors= & m_ShowErrors & ,  & _
+                        LogErrors= & m_LogErrors & ,  & _
+                        DetailedErrorInfo= & m_DetailedErrorInfo, MODULE_NAME
+3070    End If
+3080
+3090    Exit Sub
+3100
+3110 ErrorHandler
+3120    Debug.Print Ошибка при настройке ErrorHandler  & Err.Number &  -  & Err.Description &  в строке  & Erl
+3130    Resume Next
+3140 End Sub
+
+' Свойства
+ Public Property Get ShowErrors() As Boolean
+3160    ShowErrors = m_ShowErrors
+3170 End Property
+
+ Public Property Let ShowErrors(ByVal Value As Boolean)
+3190    m_ShowErrors = Value
+3200    If m_Logger.IsLoggerInitialized Then
+3210        m_Logger.Log_Info Параметр ShowErrors установлен в  & Value, MODULE_NAME
+3220    End If
+3230 End Property
+
+ Public Property Get LogErrors() As Boolean
+3250    LogErrors = m_LogErrors
+3260 End Property
+
+ Public Property Let LogErrors(ByVal Value As Boolean)
+3280    m_LogErrors = Value
+3290    If m_Logger.IsLoggerInitialized Then
+3300        m_Logger.Log_Info Параметр LogErrors установлен в  & Value, MODULE_NAME
+3310    End If
+3320 End Property
+
+ Public Property Get DetailedErrorInfo() As Boolean
+3340    DetailedErrorInfo = m_DetailedErrorInfo
+3350 End Property
+
+Public Property Let DetailedErrorInfo(ByVal Value As Boolean)
+3370    m_DetailedErrorInfo = Value
+3380    If m_Logger.IsLoggerInitialized Then
+3390        m_Logger.Log_Info Параметр DetailedErrorInfo установлен в  & Value, MODULE_NAME
+3400    End If
+3410 End Property
+

@@ -1,0 +1,227 @@
+Attribute VB_Name = "ErrorLoggerTest"
+' Модуль тестирования ErrorHandler и Logger
+Option Explicit
+
+ Private m_Logger As Logger
+ Private m_ErrorHandler As ErrorHandler
+
+ Sub TestErrorHandlerAndLogger()
+40     On Error GoTo ErrorHandler
+50
+60     ' Инициализация
+    Set m_Logger = GetLogger()
+    Set m_ErrorHandler = GetErrorHandler()
+90
+100    ' Тестирование Logger
+110    Debug.Print "--- Тестирование Logger ---"
+120    TestLogger
+130
+140    ' Тестирование ErrorHandler
+150    Debug.Print "--- Тестирование ErrorHandler ---"
+160    TestErrorHandler
+170
+180    ' Тестирование интеграции
+190    Debug.Print "--- Тестирование интеграции ErrorHandler и Logger ---"
+200    TestIntegration
+210
+220    MsgBox "Тестирование завершено успешно!", vbInformation, "Тест"
+230
+240    Exit Sub
+250
+260 ErrorHandler:
+270    MsgBox "Ошибка при выполнении тестов: " & Err.Number & " - " & Err.Description, vbCritical, "Ошибка теста"
+280 End Sub
+
+ Private Sub TestLogger()
+300    On Error GoTo ErrorHandler
+310
+
+320    ' Проверка инициализации объектов
+330    If m_Logger Is Nothing Then
+340        Set m_Logger = GetLogger()
+350    End If
+360
+370    If m_ErrorHandler Is Nothing Then
+380        Set m_ErrorHandler = GetErrorHandler()
+390    End If
+400
+410    ' Тест различных уровней логирования
+420    m_Logger.Log_Debug "Это сообщение уровня DEBUG", "TestLogger"
+430    m_Logger.Log_Info "Это сообщение уровня INFO", "TestLogger"
+440    m_Logger.Log_Warning "Это сообщение уровня WARNING", "TestLogger"
+450    m_Logger.Log_Error "Это сообщение уровня ERROR", "TestLogger"
+460    m_Logger.Log_Success "Это сообщение уровня SUCCESS", "TestLogger"
+470
+480    ' Тест изменения конфигурации
+490    m_Logger.SetLogLevel LogWarning
+500    m_Logger.Log_Debug "Это сообщение уровня DEBUG не должно появиться при уровне WARNING", "TestLogger"
+510    m_Logger.Log_Warning "Это сообщение уровня WARNING должно появиться", "TestLogger"
+520
+530    ' Возврат к исходному уровню
+540    m_Logger.SetLogLevel LogDebug
+550    m_Logger.Log_Debug "Это сообщение уровня DEBUG снова должно появиться", "TestLogger"
+560
+570    Debug.Print "Путь к файлу лога: " & m_Logger.LogFilePath
+580
+590    Exit Sub
+600
+610 ErrorHandler:
+620    If Not m_ErrorHandler Is Nothing Then
+630        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestLogger", Erl
+640    Else
+650        Debug.Print "Ошибка в TestLogger: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+660    End If
+670    Resume Next
+680 End Sub
+
+ Private Sub TestErrorHandler()
+700    On Error GoTo ErrorHandler
+710
+720    ' Проверка инициализации объектов
+730    If m_Logger Is Nothing Then
+740        Set m_Logger = GetLogger()
+750    End If
+760
+770    If m_ErrorHandler Is Nothing Then
+780        Set m_ErrorHandler = GetErrorHandler()
+790    End If
+800
+810    ' Тест основного метода обработки ошибок
+820    m_ErrorHandler.HandleError 1000, "Тестовая ошибка", "TestErrorHandler", 0, False, "Это тестовая ошибка для проверки"
+830
+840    ' Тест обработчика дублирования имен (без диалога)
+850    m_ErrorHandler.ShowErrors = False
+860    Dim dupAction As DuplicateNameAction
+870    dupAction = m_ErrorHandler.HandleDuplicateNameError("TestName", "Модуль")
+880    m_Logger.Log_Info "Действие при дублировании имени: " & dupAction, "TestErrorHandler"
+890
+900    ' Тест обработчика некорректных имен (без диалога)
+910    Dim invalidAction As InvalidNameAction
+920    invalidAction = m_ErrorHandler.HandleInvalidNameError("Invalid@Name", "Переменная")
+930    m_Logger.Log_Info "Действие при некорректном имени: " & invalidAction, "TestErrorHandler"
+940
+950    ' Тест обработчика ошибок доступа к файлу (без диалога)
+960    Dim fileAction As Boolean
+970    fileAction = m_ErrorHandler.HandleFileAccessError("C:\несуществующий_файл.txt", "чтение")
+980    m_Logger.Log_Info "Действие при ошибке доступа к файлу: " & fileAction, "TestErrorHandler"
+990
+1000   ' Восстановление показа диалоговых окон
+1010   m_ErrorHandler.ShowErrors = True
+1020
+1030   Exit Sub
+1040
+1050 ErrorHandler:
+1060   If Not m_ErrorHandler Is Nothing Then
+1070       m_ErrorHandler.HandleError Err.Number, Err.Description, "TestErrorHandler", Erl, False
+1080   Else
+1090       Debug.Print "Ошибка в TestErrorHandler: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+1100   End If
+1110   Resume Next
+1120 End Sub
+
+ Private Sub TestIntegration()
+1140   On Error GoTo ErrorHandler
+1150
+1160   ' Проверка инициализации объектов
+1170   If m_Logger Is Nothing Then
+1180       Set m_Logger = GetLogger()
+1190   End If
+1200
+1210   If m_ErrorHandler Is Nothing Then
+1220       Set m_ErrorHandler = GetErrorHandler()
+1230   End If
+1240
+1250   ' Тест интеграции ErrorHandler и Logger
+1260   m_Logger.Log_Info "Начало теста интеграции", "TestIntegration"
+1270
+1280   ' Искусственное создание ошибки для проверки
+1290   Dim testObj As Object
+1300   m_Logger.Log_Info "Попытка обращения к неустановленному объекту...", "TestIntegration"
+1310
+1320   On Error Resume Next
+1330   testObj.Test = 123  ' Эта строка вызовет ошибку 91 - Object variable not set
+1340
+1350   If Err.Number <> 0 Then
+1360       m_ErrorHandler.HandleError Err.Number, Err.Description, "TestIntegration", 1330, False
+1370   End If
+1380   On Error GoTo ErrorHandler
+1390
+1400   ' Проверка обработки ошибки деления на ноль
+1410   m_Logger.Log_Info "Попытка деления на ноль...", "TestIntegration"
+1420
+1430   On Error Resume Next
+1440   Dim result As Double
+1450   result = 1 / 0  ' Эта строка вызовет ошибку 11 - Division by zero
+1460
+1470   If Err.Number <> 0 Then
+1480       m_ErrorHandler.HandleError Err.Number, Err.Description, "TestIntegration", 1450, False
+1490   End If
+1500   On Error GoTo ErrorHandler
+1510
+1520   ' Проверка обработки доступа к несуществующему файлу
+1530   m_Logger.Log_Info "Попытка открытия несуществующего файла...", "TestIntegration"
+1540
+1550   On Error Resume Next
+1560   Open "C:\несуществующий_файл.txt" For Input As #1
+1570
+1580   If Err.Number <> 0 Then
+1590       m_ErrorHandler.HandleError Err.Number, Err.Description, "TestIntegration", 1560, False
+1600       On Error Resume Next
+1610       Close #1
+1620       On Error GoTo ErrorHandler
+1630   End If
+1640
+1650   m_Logger.Log_Success "Тест интеграции завершен успешно", "TestIntegration"
+1660
+1670   Exit Sub
+1680
+1690 ErrorHandler:
+1700   If Not m_ErrorHandler Is Nothing Then
+1710       m_ErrorHandler.HandleError Err.Number, Err.Description, "TestIntegration", Erl
+1720   Else
+1730       Debug.Print "Ошибка в TestIntegration: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+1740   End If
+1750   Resume Next
+1760 End Sub
+
+ Sub SimulateErrorWithHandling()
+1780   On Error GoTo ErrorHandler
+1790
+1800   ' Инициализация объектов
+1810   Set m_Logger = GetLogger()
+1820   Set m_ErrorHandler = GetErrorHandler()
+1830
+1840   m_Logger.Log_Info "Начало процедуры с демонстрацией обработки ошибок", "SimulateErrorWithHandling"
+1850
+1860   ' Искусственная ошибка
+1870   Dim x As Integer
+1880   Dim y As Integer
+1890
+1900   x = 10
+1910   y = 0
+1920
+1930   m_Logger.Log_Info "Попытка деления на ноль: " & x & " / " & y, "SimulateErrorWithHandling"
+1940   Dim result As Integer
+1950   result = x / y  ' Вызовет ошибку деления на ноль
+1960
+1970   ' Этот код никогда не выполнится из-за ошибки выше
+1980   m_Logger.Log_Info "Результат: " & result, "SimulateErrorWithHandling"
+1990
+2000   Exit Sub
+2010
+2020 ErrorHandler:
+2030   ' Здесь сработает наш обработчик ошибок
+2040   If Not m_ErrorHandler Is Nothing Then
+       m_ErrorHandler.HandleError Err.Number, Err.Description, "SimulateErrorWithHandling", Erl, True, _
+                             "Переменные: x=" & x & ", y=" & y
+2070   Else
+2080       MsgBox "Ошибка: " & Err.Number & " - " & Err.Description & " в строке " & Erl, vbCritical, "Ошибка"
+2090   End If
+2100
+2110   ' Продолжаем выполнение после ошибки
+2120   m_Logger.Log_Warning "Восстановление после ошибки", "SimulateErrorWithHandling"
+2130
+2140   ' Безопасное завершение
+2150   m_Logger.Log_Info "Завершение процедуры с ошибкой", "SimulateErrorWithHandling"
+2160 End Sub
+

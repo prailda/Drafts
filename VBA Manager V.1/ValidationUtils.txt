@@ -1,0 +1,533 @@
+' Модуль ValidationUtils
+' Предоставляет набор утилит для валидации имен, путей и других данных
+' Используется различными компонентами системы для проверки входных данных
+
+Option Explicit
+
+' Константы
+ Private Const MODULE_NAME As String = "ValidationUtils"
+ Private Const MAX_VBA_NAME_LENGTH As Integer = 31 ' Максимальная длина имени для VBA-объектов
+
+' Константы для специальных символов
+ Private Const INVALID_FILENAME_CHARS As String = "\/:|<>*?""" ' Символы, недопустимые в имени файла
+ Private Const INVALID_VBA_NAME_CHARS As String = "!@#$%^&*()+=-[]\{}|;':,.<>/?`~ " ' Символы, недопустимые в имени VBA-объекта
+
+' Ссылки на глобальные объекты
+ Private m_Logger As Object
+ Private m_ErrorHandler As Object
+
+'-----------------------------------------------------------------------------
+' Функции для валидации имен VBA-компонентов
+'-----------------------------------------------------------------------------
+
+' Проверка корректности имени VBA-компонента
+ Public Function IsValidVBAComponentName(ByVal ComponentName As String) As Boolean
+80     On Error GoTo ErrorHandler
+90
+100     ' Инициализация глобальных объектов при необходимости
+110     InitGlobals
+120
+130     ' Проверка длины имени
+140     If Len(ComponentName) = 0 Or Len(ComponentName) > MAX_VBA_NAME_LENGTH Then
+150         If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Некорректная длина имени VBA-компонента: " & ComponentName, MODULE_NAME
+160         IsValidVBAComponentName = False
+170         Exit Function
+180     End If
+190
+200     ' Проверка первого символа (должен быть буквой)
+210     If Not IsLetter(Left(ComponentName, 1)) Then
+220         If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Имя VBA-компонента должно начинаться с буквы: " & ComponentName, MODULE_NAME
+230         IsValidVBAComponentName = False
+240         Exit Function
+250     End If
+260
+270     ' Проверка на недопустимые символы
+280     Dim i As Integer
+290     For i = 1 To Len(ComponentName)
+300         Dim currentChar As String
+310         currentChar = Mid(ComponentName, i, 1)
+320
+330         ' Символ должен быть буквой, цифрой или подчеркиванием
+340         If Not (IsLetter(currentChar) Or IsDigit(currentChar) Or currentChar = "_") Then
+350             If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Имя VBA-компонента содержит недопустимый символ '" & currentChar & "': " & ComponentName, MODULE_NAME
+360             IsValidVBAComponentName = False
+370             Exit Function
+380         End If
+390     Next i
+400
+410     ' Проверка на совпадение с зарезервированными словами VBA
+420     If IsVBAReservedWord(ComponentName) Then
+430         If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Имя VBA-компонента совпадает с зарезервированным словом: " & ComponentName, MODULE_NAME
+440         IsValidVBAComponentName = False
+450         Exit Function
+460     End If
+470
+480     ' Если все проверки пройдены, имя корректно
+490     IsValidVBAComponentName = True
+500
+510     Exit Function
+520
+530 ErrorHandler:
+540     If Not m_ErrorHandler Is Nothing Then
+550         m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".IsValidVBAComponentName", Erl, False
+560     Else
+570         Debug.Print "Ошибка в " & MODULE_NAME & ".IsValidVBAComponentName" & ": " & Err.Number & " - " & Err.Description
+580     End If
+590     IsValidVBAComponentName = False
+600     Resume Next
+610 End Function
+
+' Очистка имени VBA-компонента от недопустимых символов
+ Public Function CleanVBAComponentName(ByVal ComponentName As String) As String
+630     On Error GoTo ErrorHandler
+640
+650     ' Инициализация глобальных объектов при необходимости
+660     InitGlobals
+670
+680     Dim result As String
+690     result = ComponentName
+700
+710     ' Если имя пустое, возвращаем значение по умолчанию
+720     If Len(result) = 0 Then
+730         If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Попытка очистки пустого имени VBA-компонента", MODULE_NAME
+740         CleanVBAComponentName = "Module1"
+750         Exit Function
+760     End If
+770
+780     ' Замена недопустимых символов на подчеркивания
+790     Dim i As Integer
+800     For i = 1 To Len(result)
+810         Dim currentChar As String
+820         currentChar = Mid(result, i, 1)
+830
+840         ' Если символ недопустимый, заменяем его на подчеркивание
+850         If Not (IsLetter(currentChar) Or IsDigit(currentChar) Or currentChar = "_") Then
+860             Mid(result, i, 1) = "_"
+870         End If
+880     Next i
+890
+900     ' Если первый символ не буква, добавляем префикс
+910     If Not IsLetter(Left(result, 1)) Then
+920         result = "m_" & result
+930     End If
+940
+950     ' Обрезаем имя до максимально допустимой длины
+960     If Len(result) > MAX_VBA_NAME_LENGTH Then
+970         result = Left(result, MAX_VBA_NAME_LENGTH)
+980     End If
+990
+1000    ' Проверка на зарезервированное слово
+1005     If IsVBAReservedWord(result) Then
+1010                  result = result & "_"
+1015                    ' Добавим логирование
+1020                    If Not m_Logger Is Nothing Then
+1025                        m_Logger.Log_Debug "Имя VBA-компонента является зарезервированным словом и было изменено: " & ComponentName & " -> " & result, MODULE_NAME
+1030                    End If
+1035                End If
+1040
+1050    ' Логируем изменение имени, если оно произошло
+1060    If result <> ComponentName Then
+1070        If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Имя VBA-компонента очищено: " & ComponentName & " -> " & result, MODULE_NAME
+1080    End If
+1090
+1100    CleanVBAComponentName = result
+1110
+1120    Exit Function
+1130
+1140 ErrorHandler:
+1150    If Not m_ErrorHandler Is Nothing Then
+1160        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".CleanVBAComponentName", Erl, False
+1170    Else
+1180        Debug.Print "Ошибка в " & MODULE_NAME & ".CleanVBAComponentName" & ": " & Err.Number & " - " & Err.Description
+1190    End If
+1200    ' В случае ошибки возвращаем исходное имя
+1210    CleanVBAComponentName = ComponentName
+1220    Resume Next
+1230 End Function
+
+' Генерация уникального имени VBA-компонента для целевой книги
+ Public Function GenerateUniqueVBAComponentName(ByVal TargetWorkbook As Workbook, ByVal BaseName As String, _
+                                               Optional ByVal ComponentType As Vbext_ComponentType = vbext_ct_StdModule) As String
+1250    On Error GoTo ErrorHandler
+1260
+1270    ' Инициализация глобальных объектов при необходимости
+1280    InitGlobals
+1290
+1300    ' Очистка базового имени
+1310    Dim cleanName As String
+1320    cleanName = CleanVBAComponentName(BaseName)
+1330
+1340    ' Проверка существования компонента с таким именем
+1350    If Not ComponentExists(TargetWorkbook, cleanName, ComponentType) Then
+1360        GenerateUniqueVBAComponentName = cleanName
+1370        Exit Function
+1380    End If
+1390
+1400    ' Генерация уникального имени с использованием суффикса
+1410    Dim counter As Integer
+1420    Dim suffix As String
+1430    Dim candidateName As String
+1440
+1450    counter = 1
+1460
+1470    Do
+1480        ' Формирование суффикса
+1490        suffix = "_" & counter
+1500
+1510        ' Обеспечение максимальной длины имени
+1520        If Len(cleanName) + Len(suffix) > MAX_VBA_NAME_LENGTH Then
+1530            candidateName = Left(cleanName, MAX_VBA_NAME_LENGTH - Len(suffix)) & suffix
+1540        Else
+1550            candidateName = cleanName & suffix
+1560        End If
+1570
+1580        ' Проверка существования компонента с таким именем
+1590        If Not ComponentExists(TargetWorkbook, candidateName, ComponentType) Then
+1600            GenerateUniqueVBAComponentName = candidateName
+1610            Exit Function
+1620        End If
+1630
+1640        counter = counter + 1
+1650
+1660        ' Предохранитель от бесконечного цикла
+1670        If counter > 1000 Then
+1680            ' Генерация случайного имени
+1690            candidateName = "Module_" & Format(Now, "yyyymmddhhnnss") & "_" & Int(Rnd * 1000)
+1700            If Not m_Logger Is Nothing Then m_Logger.Log_Warning "Превышен лимит итераций для генерации имени. Создано случайное имя: " & candidateName, MODULE_NAME
+1710            GenerateUniqueVBAComponentName = candidateName
+1720            Exit Function
+1730        End If
+1740    Loop
+1750
+1760    Exit Function
+1770
+1780 ErrorHandler:
+1790    If Not m_ErrorHandler Is Nothing Then
+1800        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".GenerateUniqueVBAComponentName", Erl, False
+1810    Else
+1820        Debug.Print "Ошибка в " & MODULE_NAME & ".GenerateUniqueVBAComponentName" & ": " & Err.Number & " - " & Err.Description
+1830    End If
+1840    ' В случае ошибки возвращаем преобразованное базовое имя с временной меткой
+1850    GenerateUniqueVBAComponentName = "Module_" & Format(Now, "yyyymmddhhnnss")
+1860    Resume Next
+1870 End Function
+
+'-----------------------------------------------------------------------------
+' Функции для валидации путей файлов и каталогов
+'-----------------------------------------------------------------------------
+
+' Проверка корректности пути к файлу
+Public Function IsValidFilePath(ByVal FilePath As String) As Boolean
+1890    On Error GoTo ErrorHandler
+1900
+1910    ' Инициализация глобальных объектов при необходимости
+1920    InitGlobals
+1930
+1940    ' Проверка на пустой путь
+1950    If Len(Trim(FilePath)) = 0 Then
+1960        If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Путь к файлу не может быть пустым", MODULE_NAME
+1970        IsValidFilePath = False
+1980        Exit Function
+1990    End If
+2000
+2010    ' Проверка на слишком длинный путь (максимальная длина пути в Windows - 260 символов)
+2020    If Len(FilePath) > 260 Then
+2030        If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Путь к файлу слишком длинный (> 260 символов): " & FilePath, MODULE_NAME
+2040        IsValidFilePath = False
+2050        Exit Function
+2060    End If
+2070
+2080    ' Извлечение имени файла (без пути)
+2090    Dim fileName As String
+2100    fileName = GetFileName(FilePath)
+2110
+2120    Dim i As Integer
+2130    Dim currentChar As String
+2140
+2150    For i = 1 To Len(fileName)
+2160        currentChar = Mid(fileName, i, 1)
+2170        If InStr(INVALID_FILENAME_CHARS, currentChar) > 0 Then
+2180            If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Имя файла содержит недопустимый символ '" & currentChar & "': " & fileName, MODULE_NAME
+2190            IsValidFilePath = False
+2200            Exit Function
+2210        End If
+2220    Next i
+2230
+2240    ' Проверка формата пути
+2250    If Len(FilePath) >= 2 Then
+2260        Dim isValidFormat As Boolean
+        isValidFormat = (Mid(FilePath, 2, 1) = ":" And IsLetter(Left(FilePath, 1))) Or _
+                       (Left(FilePath, 2) = "\\")  ' Проверка на UNC путь
+2290
+2300        If Not isValidFormat Then
+2310            If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Путь к файлу имеет неверный формат: " & FilePath, MODULE_NAME
+2320            IsValidFilePath = False
+2330            Exit Function
+2340        End If
+2350    End If
+2360
+2370    ' Если все проверки пройдены, путь корректен
+2380    IsValidFilePath = True
+2390
+2400    Exit Function
+2410
+2420 ErrorHandler:
+2430    If Not m_ErrorHandler Is Nothing Then
+2440        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".IsValidFilePath", Erl, False
+2450    Else
+2460        Debug.Print "Ошибка в " & MODULE_NAME & ".IsValidFilePath" & ": " & Err.Number & " - " & Err.Description
+2470    End If
+2480    IsValidFilePath = False
+2490    Resume Next
+2500 End Function
+
+' Проверка корректности пути к каталогу
+Public Function IsValidDirectoryPath(ByVal DirectoryPath As String) As Boolean
+2510    On Error GoTo ErrorHandler
+2520
+2530    ' Инициализация глобальных объектов при необходимости
+2540    InitGlobals
+2550
+2560    ' Проверка на пустой путь
+2570    If Len(Trim(DirectoryPath)) = 0 Then
+2580        If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Путь к каталогу не может быть пустым", MODULE_NAME
+2590        IsValidDirectoryPath = False
+2600        Exit Function
+2610    End If
+2620
+2630    ' Проверка на слишком длинный путь (максимальная длина пути в Windows - 260 символов)
+2640    If Len(DirectoryPath) > 260 Then
+2650        If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Путь к каталогу слишком длинный (> 260 символов): " & DirectoryPath, MODULE_NAME
+2660        IsValidDirectoryPath = False
+2670        Exit Function
+2680    End If
+2690
+2700    ' Проверка формата пути (на добавляем дополнительные проверки для неверного диска)
+2710    Dim isValidFormat As Boolean
+2720
+2730    ' Путь диска должен начинаться с буквы и : (например, C:)
+2740    If Len(DirectoryPath) >= 2 And Mid(DirectoryPath, 2, 1) = ":" Then
+2750        If Not IsLetter(Left(DirectoryPath, 1)) Then
+2760            If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Неверный формат диска: " & DirectoryPath, MODULE_NAME
+2770            IsValidDirectoryPath = False
+2780            Exit Function
+2790        End If
+2800    ElseIf Left(DirectoryPath, 2) <> "\\" Then ' Проверка на UNC путь
+2810        If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Путь к каталогу имеет неверный формат: " & DirectoryPath, MODULE_NAME
+2820        IsValidDirectoryPath = False
+2830        Exit Function
+2840    End If
+2850
+2860    ' Проверка на недопустимые символы в имени каталога (только для последней части пути)
+2870    Dim folderName As String
+2880    folderName = GetFileName(DirectoryPath)
+2890
+2900    If Len(folderName) > 0 Then
+2910        Dim i As Integer
+2920        For i = 1 To Len(folderName)
+2930            If InStr(INVALID_FILENAME_CHARS, Mid(folderName, i, 1)) > 0 Then
+2940                If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Имя каталога содержит недопустимый символ: " & folderName, MODULE_NAME
+2950                IsValidDirectoryPath = False
+2960                Exit Function
+2970            End If
+2980        Next i
+2990    End If
+3000
+3010    ' Если все проверки пройдены, путь корректен
+3020    IsValidDirectoryPath = True
+3030
+3040    Exit Function
+3050
+3060 ErrorHandler:
+3070    If Not m_ErrorHandler Is Nothing Then
+3080        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".IsValidDirectoryPath", Erl, False
+3090    Else
+3100        Debug.Print "Ошибка в " & MODULE_NAME & ".IsValidDirectoryPath" & ": " & Err.Number & " - " & Err.Description
+3110    End If
+3120    IsValidDirectoryPath = False
+3130    Resume Next
+3140 End Function
+
+' Очистка пути к файлу от недопустимых символов
+ Public Function CleanFilePath(ByVal FilePath As String) As String
+3060    On Error GoTo ErrorHandler
+3070
+3080    ' Инициализация глобальных объектов при необходимости
+3090    InitGlobals
+3100
+3110    ' Если путь пустой, возвращаем значение по умолчанию
+3120    If Len(Trim(FilePath)) = 0 Then
+3130        If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Попытка очистки пустого пути к файлу", MODULE_NAME
+3140        CleanFilePath = "C:\Temp\file.txt"
+3150        Exit Function
+3160    End If
+3170
+3180    ' Разделение пути на директорию и имя файла
+3190    Dim DirPath As String
+3200    Dim fileName As String
+3210    Dim lastSlash As Long
+3220
+3230    lastSlash = InStrRev(FilePath, "\")
+3240
+3250    If lastSlash > 0 Then
+3260        DirPath = Left(FilePath, lastSlash)
+3270        fileName = Mid(FilePath, lastSlash + 1)
+3280    Else
+3290        DirPath = ""
+3300        fileName = FilePath
+3310    End If
+3320
+3330    ' Очистка имени файла
+3340    Dim cleanFileName As String
+3350    cleanFileName = fileName
+3360
+3370    Dim i As Integer
+3380    For i = 1 To Len(cleanFileName)
+3390        Dim currentChar As String
+3400        currentChar = Mid(cleanFileName, i, 1)
+3410
+3420        ' Если символ недопустимый, заменяем его на подчеркивание
+3430        If InStr(INVALID_FILENAME_CHARS, currentChar) > 0 Then
+3440            Mid(cleanFileName, i, 1) = "_"
+3450        End If
+3460    Next i
+3470
+3480    ' Сборка очищенного пути
+3490    CleanFilePath = DirPath & cleanFileName
+3500
+3510    ' Логируем изменение пути, если оно произошло
+3520    If CleanFilePath <> FilePath Then
+3530        If Not m_Logger Is Nothing Then m_Logger.Log_Debug "Путь к файлу очищен: " & FilePath & " -> " & CleanFilePath, MODULE_NAME
+3540    End If
+3550
+3560    Exit Function
+3570
+3580 ErrorHandler:
+3590    If Not m_ErrorHandler Is Nothing Then
+3600        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".CleanFilePath", Erl, False
+3610    Else
+3620        Debug.Print "Ошибка в " & MODULE_NAME & ".CleanFilePath" & ": " & Err.Number & " - " & Err.Description
+3630    End If
+3640    ' В случае ошибки возвращаем исходный путь
+3650    CleanFilePath = FilePath
+3660    Resume Next
+3670 End Function
+
+'-----------------------------------------------------------------------------
+' Вспомогательные функции
+'-----------------------------------------------------------------------------
+
+' Проверка, является ли символ буквой
+ Public Function IsLetter(ByVal Char As String) As Boolean
+3690    On Error Resume Next
+3700    If Len(Char) <> 1 Then
+3710        IsLetter = False
+3720        Exit Function
+3730    End If
+3740
+3750    IsLetter = ((Char >= "A" And Char <= "Z") Or (Char >= "a" And Char <= "z"))
+3760 End Function
+
+' Проверка, является ли символ цифрой
+ Public Function IsDigit(ByVal Char As String) As Boolean
+3780    On Error Resume Next
+3790    If Len(Char) <> 1 Then
+3800        IsDigit = False
+3810        Exit Function
+3820    End If
+3830
+3840    IsDigit = (Char >= "0" And Char <= "9")
+3850 End Function
+
+' Проверка, является ли слово зарезервированным в VBA
+Public Function IsVBAReservedWord(ByVal Word As String) As Boolean
+3870    On Error Resume Next
+3880    Dim reservedWords() As String
+3890    Dim i As Integer
+3900
+3910    ' Список зарезервированных слов VBA
+3920    reservedWords = Split("And As Boolean ByRef Byte ByVal Call Case Class Const Currency Debug Dim Do Double Each Else ElseIf Empty End Enum Eqv Error Event Exit False For Friend Function Get Global GoTo If Imp Implements In Integer Is Let Like Long Loop Me Mod Module New Next Not Nothing Null Object On Option Optional Or ParamArray Preserve Private Property Public RaiseEvent ReDim Resume Select Set Single Static Step Stop String Sub Then To True Type TypeOf Until Variant Wend While With WithEvents", " ")
+3930
+3940    ' Преобразование проверяемого слова в верхний регистр для сравнения
+3950    Dim upperWord As String
+3960    upperWord = UCase(Word)
+3970
+3980    For i = LBound(reservedWords) To UBound(reservedWords)
+3990        If upperWord = UCase(reservedWords(i)) Then
+4000            IsVBAReservedWord = True
+4010            Exit Function
+4020        End If
+4030    Next i
+4040
+4050    IsVBAReservedWord = False
+4060 End Function
+
+' Получение имени файла из полного пути
+ Public Function GetFileName(ByVal FilePath As String) As String
+4040    On Error Resume Next
+4050    Dim lastSlash As Long
+4060
+4070    lastSlash = InStrRev(FilePath, "\")
+4080
+4090    If lastSlash > 0 Then
+4100        GetFileName = Mid(FilePath, lastSlash + 1)
+4110    Else
+4120        GetFileName = FilePath
+4130    End If
+4140 End Function
+
+' Получение пути к директории из полного пути
+ Public Function GetDirectoryPath(ByVal FilePath As String) As String
+4160    On Error Resume Next
+4170    Dim lastSlash As Long
+4180
+4190    lastSlash = InStrRev(FilePath, "\")
+4200
+4210    If lastSlash > 0 Then
+4220        GetDirectoryPath = Left(FilePath, lastSlash)
+4230    Else
+4240        GetDirectoryPath = ""
+4250    End If
+4260 End Function
+
+' Проверка существования компонента с указанным именем в книге
+ Private Function ComponentExists(ByVal TargetWorkbook As Workbook, ByVal ComponentName As String, _
+                                    Optional ByVal ComponentType As Vbext_ComponentType = vbext_ct_StdModule) As Boolean
+4280    On Error Resume Next
+4290
+4300    Dim vbComp As Object
+4310    Dim compTypeMatch As Boolean
+4320
+4330    ' Проверка доступа к VBProject
+4340    If TargetWorkbook.VBProject Is Nothing Then
+4350        ComponentExists = False
+4360        Exit Function
+4370    End If
+4380
+4390    ' Поиск компонента по имени
+4400    Set vbComp = TargetWorkbook.VBProject.VBComponents(ComponentName)
+4410
+4420    ' Если компонент найден, проверяем его тип
+4430    If Not vbComp Is Nothing Then
+4440        compTypeMatch = (vbComp.Type = ComponentType)
+4450        ComponentExists = compTypeMatch
+4460    Else
+4470        ComponentExists = False
+4480    End If
+4490 End Function
+
+' Инициализация глобальных объектов
+ Private Sub InitGlobals()
+4510    On Error Resume Next
+4520
+4530    ' Инициализация Logger, если еще не инициализирован
+4540    If m_Logger Is Nothing Then
+4550        Set m_Logger = GetLogger()
+4560    End If
+4570
+4580    ' Инициализация ErrorHandler, если еще не инициализирован
+4590    If m_ErrorHandler Is Nothing Then
+4600        Set m_ErrorHandler = GetErrorHandler()
+4610    End If
+4620 End Sub
+

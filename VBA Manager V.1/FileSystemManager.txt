@@ -1,0 +1,520 @@
+' Класс FileSystemManager
+' Предоставляет функции для работы с файловой системой
+' Оптимизирован для работы с файлами конфигурации и VBA-компонентами
+
+Option Explicit
+
+' Константы
+ Private Const MODULE_NAME As String = FileSystemManager
+ Private Const MAX_PATH As Long = 260
+
+' Ссылки на глобальные объекты
+ Private m_Logger As Object
+ Private m_ErrorHandler As Object
+ Private m_ValidationUtils As Object
+
+' Инициализация
+ Private Sub Class_Initialize()
+70     InitGlobals
+80
+90     If Not m_Logger Is Nothing Then
+100        m_Logger.Log_Info FileSystemManager инициализирован, MODULE_NAME
+110    End If
+120 End Sub
+
+'-----------------------------------------------------------------------------
+' Методы для работы с каталогами
+'-----------------------------------------------------------------------------
+
+' Проверка существования каталога
+ Public Function DirectoryExists(ByVal DirPath As String) As Boolean
+140    On Error GoTo ErrorHandler
+150
+160    If Len(Trim(DirPath)) = 0 Then
+170        DirectoryExists = False
+180        Exit Function
+190    End If
+200
+210    ' Обработка завершающего слеша
+220    If Right(DirPath, 1) =  Then
+230        DirectoryExists = (Dir(DirPath, vbDirectory)  )
+240    Else
+250        DirectoryExists = (Dir(DirPath & , vbDirectory)  )
+260    End If
+270
+280    ' Логирование результата
+290    If Not m_Logger Is Nothing Then
+300        m_Logger.Log_Debug Проверка существования каталога  & DirPath &  -  & DirectoryExists, MODULE_NAME
+310    End If
+320
+330    Exit Function
+340
+350 ErrorHandler
+360    If Not m_ErrorHandler Is Nothing Then
+370        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .DirectoryExists, Erl, False
+380    Else
+390        Debug.Print Ошибка в  & MODULE_NAME & .DirectoryExists &   & Err.Number &  -  & Err.Description
+400    End If
+410    DirectoryExists = False
+420    Resume Next
+430 End Function
+
+' Создание каталога
+ Public Function CreateDirectory(ByVal DirPath As String) As Boolean
+450    On Error GoTo ErrorHandler
+460
+470    ' Проверка параметров
+480    If Len(Trim(DirPath)) = 0 Then
+490        If Not m_Logger Is Nothing Then m_Logger.Log_Warning Попытка создания каталога с пустым путем, MODULE_NAME
+500        CreateDirectory = False
+510        Exit Function
+520    End If
+530
+540    ' Если каталог уже существует, считаем операцию успешной
+550    If DirectoryExists(DirPath) Then
+560        If Not m_Logger Is Nothing Then m_Logger.Log_Debug Каталог уже существует  & DirPath, MODULE_NAME
+570        CreateDirectory = True
+580        Exit Function
+590    End If
+600
+610    ' Создание каталога
+620    MkDir DirPath
+630
+640    ' Проверка успешности создания
+650    If DirectoryExists(DirPath) Then
+660        If Not m_Logger Is Nothing Then m_Logger.Log_Info Каталог создан  & DirPath, MODULE_NAME
+670        CreateDirectory = True
+680    Else
+690        If Not m_Logger Is Nothing Then m_Logger.Log_Error Не удалось создать каталог  & DirPath, MODULE_NAME
+700        CreateDirectory = False
+710    End If
+720
+730    Exit Function
+740
+750 ErrorHandler
+760    If Not m_ErrorHandler Is Nothing Then
+770        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .CreateDirectory, Erl, False
+780    Else
+790        Debug.Print Ошибка в  & MODULE_NAME & .CreateDirectory &   & Err.Number &  -  & Err.Description
+800    End If
+810    CreateDirectory = False
+820    Resume Next
+830 End Function
+
+' Создание иерархии каталогов (рекурсивно)
+ Public Function CreateDirectoryRecursive(ByVal DirPath As String) As Boolean
+850    On Error GoTo ErrorHandler
+860
+870    ' Проверка параметров
+880    If Len(Trim(DirPath)) = 0 Then
+890        If Not m_Logger Is Nothing Then m_Logger.Log_Warning Попытка создания иерархии каталогов с пустым путем, MODULE_NAME
+900        CreateDirectoryRecursive = False
+910        Exit Function
+920    End If
+930
+940    ' Нормализация пути
+950    If Right(DirPath, 1)   Then DirPath = DirPath & 
+960
+970    ' Если каталог уже существует, считаем операцию успешной
+980    If DirectoryExists(DirPath) Then
+990        If Not m_Logger Is Nothing Then m_Logger.Log_Debug Каталог уже существует  & DirPath, MODULE_NAME
+1000       CreateDirectoryRecursive = True
+1010       Exit Function
+1020   End If
+1030
+1040   ' Поиск родительских каталогов и создание их при необходимости
+1050   Dim parentPath As String
+1060   Dim parts() As String
+1070   Dim i As Long
+1080
+1090   ' Разделение пути на части
+1100   parts = Split(DirPath, )
+1110   parentPath = 
+1120
+1130   ' Создание каждого уровня каталогов
+1140   For i = 0 To UBound(parts) - 1  ' -1 потому что последний элемент - пустой (из-за завершающего )
+1150       If parts(i)   Then
+1160           ' Для сетевых путей требуется специальная обработка
+1170           If i = 0 And Left(parts(i), 2) =  Then
+1180               parentPath =  & parts(i)
+1190           Else
+1200               parentPath = parentPath & parts(i) & 
+1210
+1220               ' Создание каталога данного уровня, если он не существует
+1230               If Not DirectoryExists(parentPath) Then
+1240                   On Error Resume Next
+1250                   MkDir parentPath
+1260
+1270                   ' Проверка успешности
+1280                   If Err.Number  0 Then
+1290                       If Not m_Logger Is Nothing Then
+1300                           m_Logger.Log_Error Не удалось создать каталог  & parentPath & , ошибка  & Err.Number &  -  & Err.Description, MODULE_NAME
+1310                       End If
+1320                       On Error GoTo ErrorHandler
+1330                       CreateDirectoryRecursive = False
+1340                       Exit Function
+1350                   End If
+1360                   On Error GoTo ErrorHandler
+1370
+1380                   If Not m_Logger Is Nothing Then m_Logger.Log_Debug Создан каталог  & parentPath, MODULE_NAME
+1390               End If
+1400           End If
+1410       End If
+1420   Next i
+1430
+1440   ' Успешное создание всех каталогов
+1450   If Not m_Logger Is Nothing Then m_Logger.Log_Info Иерархия каталогов создана  & DirPath, MODULE_NAME
+1460   CreateDirectoryRecursive = True
+1470
+1480   Exit Function
+1490
+1500 ErrorHandler
+1510   If Not m_ErrorHandler Is Nothing Then
+1520       m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .CreateDirectoryRecursive, Erl, False
+1530   Else
+1540       Debug.Print Ошибка в  & MODULE_NAME & .CreateDirectoryRecursive &   & Err.Number &  -  & Err.Description
+1550   End If
+1560   CreateDirectoryRecursive = False
+1570   Resume Next
+1580 End Function
+
+'-----------------------------------------------------------------------------
+' Методы для работы с файлами
+'-----------------------------------------------------------------------------
+
+' Проверка существования файла
+ Public Function FileExists(ByVal FilePath As String) As Boolean
+1600   On Error GoTo ErrorHandler
+1610
+1620   If Len(Trim(FilePath)) = 0 Then
+1630       FileExists = False
+1640       Exit Function
+1650   End If
+1660
+1670   FileExists = (Dir(FilePath)  )
+1680
+1690   ' Логирование результата
+1700   If Not m_Logger Is Nothing Then
+1710       m_Logger.Log_Debug Проверка существования файла  & FilePath &  -  & FileExists, MODULE_NAME
+1720   End If
+1730
+1740   Exit Function
+1750
+1760 ErrorHandler
+1770   If Not m_ErrorHandler Is Nothing Then
+1780       m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .FileExists, Erl, False
+1790   Else
+1800       Debug.Print Ошибка в  & MODULE_NAME & .FileExists &   & Err.Number &  -  & Err.Description
+1810   End If
+1820   FileExists = False
+1830   Resume Next
+1840 End Function
+
+' Проверка возможности записи в файл
+ Public Function CanWriteToFile(ByVal FilePath As String) As Boolean
+1860   On Error GoTo ErrorHandler
+1870
+1880   If Len(Trim(FilePath)) = 0 Then
+1890       CanWriteToFile = False
+1900       Exit Function
+1910   End If
+1920
+1930   ' Создание каталога для файла, если он не существует
+1940   Dim fileDirPath As String
+1950   fileDirPath = Left(FilePath, InStrRev(FilePath, ))
+1960
+1970   If Not DirectoryExists(fileDirPath) Then
+1980       If Not CreateDirectoryRecursive(fileDirPath) Then
+1990           CanWriteToFile = False
+2000           Exit Function
+2010       End If
+2020   End If
+2030
+2040   ' Попытка открыть файл для записи
+2050   Dim fileNum As Integer
+2060   fileNum = FreeFile
+2070
+2080   Open FilePath For Append As #fileNum
+2090   Close #fileNum
+2100
+2110   CanWriteToFile = True
+2120
+2130   ' Логирование результата
+2140   If Not m_Logger Is Nothing Then
+2150       m_Logger.Log_Debug Проверка возможности записи в файл  & FilePath &  -  & CanWriteToFile, MODULE_NAME
+2160   End If
+2170
+2180   Exit Function
+2190
+2200 ErrorHandler
+2210   If Not m_ErrorHandler Is Nothing Then
+2220       m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .CanWriteToFile, Erl, False
+2230   Else
+2240       Debug.Print Ошибка в  & MODULE_NAME & .CanWriteToFile &   & Err.Number &  -  & Err.Description
+2250   End If
+2260   CanWriteToFile = False
+2270   Resume Next
+2280 End Function
+
+' Чтение текстового файла
+ Public Function ReadTextFile(ByVal FilePath As String) As String
+2300   On Error GoTo ErrorHandler
+2310
+2320   ' Проверка существования файла
+2330   If Not FileExists(FilePath) Then
+2340       If Not m_Logger Is Nothing Then m_Logger.Log_Warning Попытка чтения несуществующего файла  & FilePath, MODULE_NAME
+2350       ReadTextFile = 
+2360       Exit Function
+2370   End If
+2380
+2390   ' Чтение файла
+2400   Dim fileNum As Integer
+2410   Dim content As String
+2420   Dim textLine As String
+2430
+2440   fileNum = FreeFile
+2450
+2460   Open FilePath For Input As #fileNum
+2470
+2480   ' Чтение файла построчно
+2490   Do Until EOF(fileNum)
+2500       Line Input #fileNum, textLine
+2510       content = content & textLine & vbCrLf
+2520   Loop
+2530
+2540   Close #fileNum
+2550
+2560   ' Удаление лишнего перевода строки в конце, если он есть
+2570   If Len(content) = 2 Then
+2580       If Right(content, 2) = vbCrLf Then
+2590           content = Left(content, Len(content) - 2)
+2600       End If
+2610   End If
+2620
+2630   ReadTextFile = content
+2640
+2650   ' Логирование результата
+2660   If Not m_Logger Is Nothing Then
+2670       m_Logger.Log_Debug Файл прочитан  & FilePath &  ( & Len(content) &  символов), MODULE_NAME
+2680   End If
+2690
+2700   Exit Function
+2710
+2720 ErrorHandler
+2730   If Not m_ErrorHandler Is Nothing Then
+2740       m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .ReadTextFile, Erl, False
+2750   Else
+2760       Debug.Print Ошибка в  & MODULE_NAME & .ReadTextFile &   & Err.Number &  -  & Err.Description
+2770   End If
+2780   ReadTextFile = 
+2790   Resume Next
+2800 End Function
+
+' Запись текстового файла
+ Public Function WriteTextFile(ByVal FilePath As String, ByVal content As String, Optional ByVal Append As Boolean = False) As Boolean
+2820   On Error GoTo ErrorHandler
+2830
+2840   ' Проверка параметров
+2850   If Len(Trim(FilePath)) = 0 Then
+2860       If Not m_Logger Is Nothing Then m_Logger.Log_Warning Попытка записи в файл с пустым путем, MODULE_NAME
+2870       WriteTextFile = False
+2880       Exit Function
+2890   End If
+2900
+2910   ' Создание каталога для файла, если он не существует
+2920   Dim fileDirPath As String
+2930   fileDirPath = Left(FilePath, InStrRev(FilePath, ))
+2940
+2950   If Not DirectoryExists(fileDirPath) Then
+2960       If Not CreateDirectoryRecursive(fileDirPath) Then
+2970           WriteTextFile = False
+2980           Exit Function
+2990       End If
+3000   End If
+3010
+3020   ' Запись файла
+3030   Dim fileNum As Integer
+3040   fileNum = FreeFile
+3050
+3060   If Append And FileExists(FilePath) Then
+3070       Open FilePath For Append As #fileNum
+3080   Else
+3090       Open FilePath For Output As #fileNum
+3100   End If
+3110
+3120   Print #fileNum, content;  ' Точка с запятой предотвращает добавление дополнительного перевода строки
+3130   Close #fileNum
+3140
+3150   WriteTextFile = True
+3160
+3170   ' Логирование результата
+3180   If Not m_Logger Is Nothing Then
+3190       If Append Then
+3200           m_Logger.Log_Debug Текст добавлен в файл  & FilePath &  ( & Len(content) &  символов), MODULE_NAME
+3210       Else
+3220           m_Logger.Log_Debug Файл записан  & FilePath &  ( & Len(content) &  символов), MODULE_NAME
+3230       End If
+3240   End If
+3250
+3260   Exit Function
+3270
+3280 ErrorHandler
+3290   If Not m_ErrorHandler Is Nothing Then
+3300       m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .WriteTextFile, Erl, False
+3310   Else
+3320       Debug.Print Ошибка в  & MODULE_NAME & .WriteTextFile &   & Err.Number &  -  & Err.Description
+3330   End If
+3340   WriteTextFile = False
+3350   Resume Next
+3360 End Function
+
+' Копирование файла
+ Public Function CopyFile(ByVal SourcePath As String, ByVal DestPath As String, Optional ByVal Overwrite As Boolean = False) As Boolean
+3380   On Error GoTo ErrorHandler
+3390
+3400   ' Проверка существования исходного файла
+3410   If Not FileExists(SourcePath) Then
+3420       If Not m_Logger Is Nothing Then m_Logger.Log_Warning Попытка копирования несуществующего файла  & SourcePath, MODULE_NAME
+3430       CopyFile = False
+3440       Exit Function
+3450   End If
+3460
+3470   ' Проверка существования конечного файла, если перезапись запрещена
+3480   If Not Overwrite And FileExists(DestPath) Then
+3490       If Not m_Logger Is Nothing Then m_Logger.Log_Warning Файл назначения уже существует и перезапись запрещена  & DestPath, MODULE_NAME
+3500       CopyFile = False
+3510       Exit Function
+3520   End If
+3530
+3540   ' Создание каталога назначения, если он не существует
+3550   Dim destDirPath As String
+3560   destDirPath = Left(DestPath, InStrRev(DestPath, ))
+3570
+3580   If Not DirectoryExists(destDirPath) Then
+3590       If Not CreateDirectoryRecursive(destDirPath) Then
+3600           CopyFile = False
+3610           Exit Function
+3620       End If
+3630   End If
+3640
+3650   ' Копирование файла
+3660   FileCopy SourcePath, DestPath
+3670
+3680   ' Проверка успешности копирования
+3690   If FileExists(DestPath) Then
+3700       If Not m_Logger Is Nothing Then m_Logger.Log_Info Файл скопирован  & SourcePath &  -  & DestPath, MODULE_NAME
+3710       CopyFile = True
+3720   Else
+3730       If Not m_Logger Is Nothing Then m_Logger.Log_Error Не удалось скопировать файл  & SourcePath &  -  & DestPath, MODULE_NAME
+3740       CopyFile = False
+3750   End If
+3760
+3770   Exit Function
+3780
+3790 ErrorHandler
+3800   If Not m_ErrorHandler Is Nothing Then
+3810       m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .CopyFile, Erl, False
+3820   Else
+3830       Debug.Print Ошибка в  & MODULE_NAME & .CopyFile &   & Err.Number &  -  & Err.Description
+3840   End If
+3850   CopyFile = False
+3860   Resume Next
+3870 End Function
+
+' Удаление файла
+ Public Function DeleteFile(ByVal FilePath As String) As Boolean
+3890   On Error GoTo ErrorHandler
+3900
+3910   ' Проверка существования файла
+3920   If Not FileExists(FilePath) Then
+3930       If Not m_Logger Is Nothing Then m_Logger.Log_Warning Попытка удаления несуществующего файла  & FilePath, MODULE_NAME
+3940       DeleteFile = True  ' Считаем операцию успешной, т.к. файла и так нет
+3950       Exit Function
+3960   End If
+3970
+3980   ' Удаление файла
+3990   Kill FilePath
+4000
+4010   ' Проверка успешности удаления
+4020   If Not FileExists(FilePath) Then
+4030       If Not m_Logger Is Nothing Then m_Logger.Log_Info Файл удален  & FilePath, MODULE_NAME
+4040       DeleteFile = True
+4050   Else
+4060       If Not m_Logger Is Nothing Then m_Logger.Log_Error Не удалось удалить файл  & FilePath, MODULE_NAME
+4070       DeleteFile = False
+4080   End If
+4090
+4100   Exit Function
+4110
+4120 ErrorHandler
+4130   If Not m_ErrorHandler Is Nothing Then
+4140       m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & .DeleteFile, Erl, False
+4150   Else
+4160       Debug.Print Ошибка в  & MODULE_NAME & .DeleteFile &   & Err.Number &  -  & Err.Description
+4170   End If
+4180   DeleteFile = False
+4190   Resume Next
+4200 End Function
+
+'-----------------------------------------------------------------------------
+' Методы для работы с путями
+'-----------------------------------------------------------------------------
+
+' Получение имени файла из полного пути
+ Public Function GetFileName(ByVal FilePath As String) As String
+4220   On Error Resume Next
+4230
+4240   If Len(Trim(FilePath)) = 0 Then
+4250       GetFileName = 
+4260       Exit Function
+4270   End If
+4280
+4290   Dim lastSlash As Long
+4300   lastSlash = InStrRev(FilePath, )
+4310
+4320   If lastSlash  0 Then
+4330       GetFileName = Mid(FilePath, lastSlash + 1)
+4340   Else
+4350       GetFileName = FilePath
+4360   End If
+4370 End Function
+
+' Получение пути к директории из полного пути
+ Public Function GetDirectoryPath(ByVal FilePath As String) As String
+4390   On Error Resume Next
+4400
+4410   If Len(Trim(FilePath)) = 0 Then
+4420       GetDirectoryPath = 
+4430       Exit Function
+4440   End If
+4450
+4460   Dim lastSlash As Long
+4470   lastSlash = InStrRev(FilePath, )
+4480
+4490   If lastSlash  0 Then
+4500       GetDirectoryPath = Left(FilePath, lastSlash)
+4510   Else
+4520       GetDirectoryPath = 
+4530   End If
+4540 End Function
+
+' Инициализация глобальных объектов
+ Private Sub InitGlobals()
+4560   On Error Resume Next
+4570
+4580   ' Инициализация Logger, если еще не инициализирован
+4590   If m_Logger Is Nothing Then
+4600       Set m_Logger = GetLogger()
+4610   End If
+4620
+4630   ' Инициализация ErrorHandler, если еще не инициализирован
+4640   If m_ErrorHandler Is Nothing Then
+4650       Set m_ErrorHandler = GetErrorHandler()
+4660   End If
+4670
+4680   ' Инициализация ValidationUtils, если еще не инициализирован
+4690   If m_ValidationUtils Is Nothing Then
+4700       ' В реальном проекте здесь бы использовался класс ValidationUtils,
+4710       ' но пока используем его методы напрямую
+4720   End If
+4730 End Sub
