@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Менеджер задач</title>
+    <script>
+        // Глобальные функции
+        function showNewProjectModal() {
+            const modal = document.getElementById('projectModal');
+            const form = document.getElementById('projectForm');
+            const titleEl = document.getElementById('projectModalTitle');
+            
+            titleEl.textContent = 'Новый проект';
+            form.reset();
+            document.getElementById('projectId').value = '';
+            modal.style.display = 'block';
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function handleProjectSubmit(event) {
+            event.preventDefault();
+            const form = event.target;
+            const id = form.projectId.value || generateId();
+            
+            const project = {
+                id,
+                name: form.projectName.value,
+                description: form.projectDescription.value,
+                createdAt: new Date().toISOString()
+            };
+
+            const index = state.projects.findIndex(p => p.id === id);
+            if (index > -1) {
+                state.projects[index] = project;
+            } else {
+                state.projects.push(project);
+            }
+
+            saveState();
+            render();
+            closeModal('projectModal');
+        }
+
+        function showNewTaskModal(projectId) {
+            const modal = document.getElementById('taskModal');
+            const form = document.getElementById('taskForm');
+            const titleEl = document.getElementById('taskModalTitle');
+            
+            titleEl.textContent = 'Новая задача';
+            form.reset();
+            document.getElementById('taskId').value = '';
+            document.getElementById('taskProjectId').value = projectId;
+            modal.style.display = 'block';
+        }
+
+        function handleTaskSubmit(event) {
+            event.preventDefault();
+            const form = event.target;
+            const id = form.taskId.value || generateId();
+            
+            const task = {
+                id,
+                projectId: form.taskProjectId.value,
+                name: form.taskName.value,
+                description: form.taskDescription.value,
+                priority: form.taskPriority.value,
+                progress: parseInt(form.taskProgress.value),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+
+            const index = state.tasks.findIndex(t => t.id === id);
+            if (index > -1) {
+                state.tasks[index] = task;
+            } else {
+                state.tasks.push(task);
+            }
+
+            saveState();
+            render();
+            closeModal('taskModal');
+        }
+
+        // Вспомогательные функции
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2);
+        }
+
+        function selectProject(id) {
+            state.currentProject = state.projects.find(p => p.id === id);
+            render();
+        }
+
+        // Состояние приложения
+        let state = {
+            projects: [],
+            tasks: [],
+            currentProject: null
+        };
+
+        // Функции работы с данными
+        function saveState() {
+            try {
+                localStorage.setItem('taskManager', JSON.stringify(state));
+            } catch (e) {
+                console.warn('Unable to save to localStorage');
+            }
+        }
+
+        function loadState() {
+            try {
+                const saved = localStorage.getItem('taskManager');
+                if (saved) {
+                    state = JSON.parse(saved);
+                }
+            } catch (e) {
+                console.warn('Unable to load from localStorage');
+            }
+            render();
+        }
+
+        // Функции рендеринга
+        function render() {
+            renderProjectTree();
+            renderContent();
+        }
+
+        function renderProjectTree() {
+            const tree = document.getElementById('projectTree');
+            if (!tree) return;
+            
+            tree.innerHTML = state.projects.map(project => `
+                <div class="tree-item">
+                    <div class="tree-content ${state.currentProject?.id === project.id ? 'active' : ''}"
+                         onclick="selectProject('${project.id}')">
+                        ${project.name}
+                    </div>
+                    <div class="tree-children">
+                        ${renderProjectTasks(project.id)}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderProjectTasks(projectId) {
+            return state.tasks
+                .filter(task => task.projectId === projectId)
+                .map(task => `
+                    <div class="tree-item">
+                        <div class="tree-content">
+                            ${task.name}
+                        </div>
+                    </div>
+                `).join('');
+        }
+
+        function renderContent() {
+            const content = document.getElementById('content');
+            if (!content) return;
+            
+            if (!state.currentProject) {
+                content.innerHTML = '<p>Выберите проект или создайте новый</p>';
+                return;
+            }
+
+            const project = state.currentProject;
+            const tasks = state.tasks.filter(t => t.projectId === project.id);
+            const completedTasks = tasks.filter(t => t.progress === 100).length;
+            const progress = tasks.length ? Math.round((completedTasks / tasks.length) * 100) : 0;
+
+            content.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: start">
+                    <div>
+                        <h2>${project.name}</h2>
+                        <p>${project.description || ''}</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="showNewTaskModal('${project.id}')">
+                        + Добавить задачу
+                    </button>
+                </div>
+
+                <div class="progress" style="margin: 1rem 0">
+                    <div class="progress-bar" style="width: ${progress}%"></div>
+                </div>
+                <p style="text-align: right; font-size: 0.875rem">
+                    Прогресс: ${progress}% (${completedTasks}/${tasks.length})
+                </p>
+
+                <div class="task-list">
+                    ${renderTasks(tasks)}
+                </div>
+            `;
+        }
+
+        function renderTasks(tasks) {
+            if (!tasks.length) {
+                return '<p>Нет задач</p>';
+            }
+
+            return tasks.map(task => `
+                <div class="task-item">
+                    <div style="display: flex; justify-content: space-between">
+                        <h3>${task.name}</h3>
+                        <span class="badge badge-${getPriorityClass(task.priority)}">
+                            ${getPriorityLabel(task.priority)}
+                        </span>
+                    </div>
+                    <p>${task.description || ''}</p>
+                    <div class="progress">
+                        <div class="progress-bar" style="width: ${task.progress}%"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getPriorityClass(priority) {
+            switch (priority) {
+                case 'high': return 'danger';
+                case 'medium': return 'warning';
+                case 'low': return 'primary';
+                default: return 'primary';
+            }
+        }
+
+        function getPriorityLabel(priority) {
+            switch (priority) {
+                case 'high': return 'Высокий';
+                case 'medium': return 'Средний';
+                case 'low': return 'Низкий';
+                default: return 'Низкий';
+            }
+        }
+
+        // Инициализация приложения при загрузке
+        document.addEventListener('DOMContentLoaded', () => {
+            loadState();
+            
+            // Добавляем обработчики событий
+            document.getElementById('taskProgress')?.addEventListener('input', function(e) {
+                document.getElementById('taskProgressOutput').value = e.target.value + '%';
+            });
+
+            // Обработка закрытия модальных окон
+            document.querySelectorAll('.modal').forEach(modal => {
+                modal.addEventListener('click', (event) => {
+                    if (event.target === modal) {
+                        closeModal(modal.id);
+                    }
+                });
+            });
+
+            // Обработка клавиши Escape
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    document.querySelectorAll('.modal').forEach(modal => {
+                        if (modal.style.display === 'block') {
+                            closeModal(modal.id);
+                        }
+                    });
+                }
+            });
+        });
+    </script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-700: #374151;
+            --radius: 8px;
+            --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            line-height: 1.5;
+            background: var(--gray-100);
+            color: var(--gray-700);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+
+        /* Дополнительные стили */
+        .checklist-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .checklist-item input[type="text"] {
+            flex: 1;
+            padding: 0.25rem 0.5rem;
+            border: 1px solid var(--gray-300);
+            border-radius: var(--radius);
+        }
+
+        .attachment-item {
+            padding: 0.5rem;
+            background: var(--gray-100);
+            border-radius: var(--radius);
+            margin-bottom: 0.25rem;
+        }
+
+        .task-dates {
+            display: flex;
+            gap: 1rem;
+            margin: 0.5rem 0;
+            font-size: 0.875rem;
+            color: var(--gray-700);
+        }
+
+        .task-badges {
+            display: flex;
+            gap: 0.25rem;
+            flex-wrap: wrap;
+        }
+
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 0.5rem;
+        }
+
+        .task-content {
+            margin: 1rem 0;
+        }
+
+        .task-footer {
+            border-top: 1px solid var(--gray-200);
+            padding-top: 1rem;
+            margin-top: 1rem;
+        }
+
+        .task-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+            margin-top: 0.5rem;
+        }
+
+        .dependency-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0;
+        }
+
+        .btn-small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+        }
+
+        .panel {
+            background: white;
+            padding: 1rem;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .tree {
+            margin-top: 1rem;
+        }
+
+        .tree-item {
+            padding: 0.25rem 0;
+        }
+
+        .tree-content {
+            padding: 0.5rem;
+            cursor: pointer;
+            border-radius: var(--radius);
+        }
+
+        .tree-content:hover {
+            background: var(--gray-100);
+        }
+
+        .tree-content.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .tree-children {
+            margin-left: 1.5rem;
+            padding-left: 0.5rem;
+            border-left: 2px solid var(--gray-200);
+        }
+
+        .task-list {
+            display: grid;
+            gap: 0.5rem;
+        }
+
+        .task-item {
+            background: white;
+            padding: 1rem;
+            border-radius: var(--radius);
+            border: 1px solid var(--gray-200);
+        }
+
+        .progress {
+            width: 100%;
+            height: 0.5rem;
+            background: var(--gray-200);
+            border-radius: 999px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--success);
+            transition: width 0.3s ease;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 1.5rem;
+            border-radius: var(--radius);
+            max-width: 500px;
+            margin: 2rem auto;
+            position: relative;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--gray-300);
+            border-radius: var(--radius);
+            font-family: inherit;
+            font-size: inherit;
+        }
+
+        .form-footer {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+            margin-top: 1rem;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-primary { background: var(--primary); color: white; }
+        .badge-success { background: var(--success); color: white; }
+        .badge-warning { background: var(--warning); color: white; }
+        .badge-danger { background: var(--danger); color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Менеджер задач</h1>
+        
+        <div class="layout">
+            <aside class="panel">
+                <button class="btn btn-primary" style="width: 100%" onclick="showNewProjectModal()">
+                    + Новый проект
+                </button>
+                <div id="projectTree" class="tree"></div>
+            </aside>
+
+            <main class="panel">
+                <div id="content">
+                    <p>Выберите проект или создайте новый</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Модальное окно для задачи -->
+    <div id="taskModal" class="modal">
+        <div class="modal-content">
+            <h2 id="taskModalTitle">Новая задача</h2>
+            <form id="taskForm" onsubmit="handleTaskSubmit(event)">
+                <div class="form-group">
+                    <label for="taskName">Название</label>
+                    <input type="text" id="taskName" required>
+                </div>
+                <div class="form-group">
+                    <label for="taskDescription">Описание</label>
+                    <textarea id="taskDescription" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="taskCategory">Категория</label>
+                    <select id="taskCategory">
+                        <option value="">Без категории</option>
+                    </select>
+                    <button type="button" class="btn btn-small" onclick="showNewCategoryModal()">
+                        + Создать категорию
+                    </button>
+                </div>
+                <div class="form-group">
+                    <label for="taskParent">Родительская задача</label>
+                    <select id="taskParent">
+                        <option value="">Нет</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="taskPriority">Приоритет</label>
+                    <select id="taskPriority">
+                        <option value="low">Низкий</option>
+                        <option value="medium">Средний</option>
+                        <option value="high">Высокий</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="taskStatus">Статус</label>
+                    <select id="taskStatus">
+                        <option value="new">Новая</option>
+                        <option value="inProgress">В работе</option>
+                        <option value="onHold">На паузе</option>
+                        <option value="completed">Завершена</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="taskStartDate">Дата начала</label>
+                    <input type="date" id="taskStartDate">
+                </div>
+                <div class="form-group">
+                    <label for="taskDueDate">Срок выполнения</label>
+                    <input type="date" id="taskDueDate">
+                </div>
+                <div class="form-group">
+                    <label for="taskTimeEstimate">Оценка времени (часы)</label>
+                    <input type="number" id="taskTimeEstimate" min="0" step="0.5">
+                </div>
+                <div class="form-group">
+                    <label for="taskDependencies">Зависимости</label>
+                    <select id="taskDependencies" multiple>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Чек-лист</label>
+                    <div id="taskChecklist">
+                        <div class="checklist-items"></div>
+                        <button type="button" class="btn btn-small" onclick="addChecklistItem()">
+                            + Добавить пункт
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Вложения</label>
+                    <input type="file" id="taskAttachments" multiple>
+                </div>
+                <input type="hidden" id="taskId">
+                <input type="hidden" id="taskProjectId">
+                <div class="form-footer">
+                    <button type="button" class="btn" onclick="closeModal('taskModal')">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <!-- Модальное окно для категории -->
+    <div id="categoryModal" class="modal">
+        <div class="modal-content">
+            <h2>Новая категория</h2>
+            <form id="categoryForm" onsubmit="handleCategorySubmit(event)">
+                <div class="form-group">
+                    <label for="categoryName">Название</label>
+                    <input type="text" id="categoryName" required>
+                </div>
+                <div class="form-group">
+                    <label for="categoryColor">Цвет</label>
+                    <input type="color" id="categoryColor" value="#2563eb">
+                </div>
+                <div class="form-footer">
+                    <button type="button" class="btn" onclick="closeModal('categoryModal')">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- Модальное окно для проекта -->
+    <div id="projectModal" class="modal">
+        <div class="modal-content">
+            <h2 id="projectModalTitle">Новый проект</h2>
+            <form id="projectForm" onsubmit="handleProjectSubmit(event)">
+                <div class="form-group">
+                    <label for="projectName">Название</label>
+                    <input type="text" id="projectName" required>
+                </div>
+                <div class="form-group">
+                    <label for="projectDescription">Описание</label>
+                    <textarea id="projectDescription" rows="3"></textarea>
+                </div>
+                <input type="hidden" id="projectId">
+                <div class="form-footer">
+                    <button type="button" class="btn" onclick="closeModal('projectModal')">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>

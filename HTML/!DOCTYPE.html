@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Расширенный менеджер задач</title>
+    <style>
+/* Основные стили */
+/* Основные стили */
+:root {
+    --primary-color: #2563eb;
+    --secondary-color: #1e40af;
+    --success-color: #16a34a;
+    --warning-color: #d97706;
+    --danger-color: #dc2626;
+    --light-gray: #f3f4f6;
+    --dark-gray: #6b7280;
+    --tree-line-color: #d1d5db;
+    --border-radius: 8px;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background-color: var(--light-gray);
+    color: #111827;
+}
+
+.container {
+    max-width: 1400px;
+    margin: auto;
+    padding: 20px;
+}
+
+.header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    text-align: center;
+    box-shadow: var(--shadow);
+}
+
+.dashboard {
+    display: flex;
+    gap: 20px;
+    height: calc(100vh - 160px);
+}
+
+.sidebar {
+    width: 300px;
+    background: white;
+    padding: 1rem;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    overflow-y: auto;
+}
+
+.main-content {
+    flex: 1;
+    background: white;
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    overflow-y: auto;
+}
+
+.breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.breadcrumb-item {
+    cursor: pointer;
+}
+
+.breadcrumb-item:hover {
+    color: var(--secondary-color);
+}
+
+.breadcrumb-separator {
+    color: var(--light-gray);
+}
+
+.tree-view {
+    list-style: none;
+    padding-left: 0;
+}
+
+.tree-item {
+    position: relative;
+    padding: 0.5rem 0;
+}
+
+.tree-item .tree-content {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    transition: all 0.2s;
+}
+
+.tree-item .tree-content:hover {
+    background-color: var(--light-gray);
+}
+
+.tree-item .tree-content.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.tree-children {
+    padding-left: 20px;
+    position: relative;
+}
+
+.tree-children::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background-color: var(--tree-line-color);
+}
+
+.btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--secondary-color);
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: white;
+    padding: 2rem;
+    border-radius: var(--border-radius);
+    width: 90%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: bold;
+}
+
+.form-group input,
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--light-gray);
+    border-radius: var(--border-radius);
+    font-size: 0.9rem;
+}
+
+.progress-container {
+    margin: 1rem 0;
+}
+
+.progress-bar {
+    height: 8px;
+    background-color: var(--light-gray);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background-color: var(--success-color);
+    transition: width 0.3s ease;
+}
+
+.task-item {
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    transition: all 0.2s;
+}
+
+.task-list {
+    list-style: none;
+}
+
+.task-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
+}
+
+
+
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>Расширенный менеджер задач</h1>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="dashboard">
+            <aside class="sidebar">
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                    <button class="btn btn-primary" style="flex: 1;" onclick="showNewProjectModal()">
+                        + Проект
+                    </button>
+                    <button class="btn btn-primary" style="flex: 1;" onclick="showNewTaskModal()">
+                        + Задача
+                    </button>
+                </div>
+                <div id="projectTree" class="tree-view"></div>
+            </aside>
+
+            <main class="main-content">
+                <div id="breadcrumbs" class="breadcrumbs"></div>
+                <div id="projectView">
+                    <!-- Контент проекта/задачи будет добавлен динамически -->
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Модальное окно для проекта -->
+    <div id="projectModal" class="modal">
+        <div class="modal-content">
+            <h2 id="projectModalTitle">Новый проект</h2>
+            <form id="projectForm">
+                <div class="form-group">
+                    <label for="projectName">Название</label>
+                    <input type="text" id="projectName" required>
+                </div>
+                <div class="form-group">
+                    <label for="projectDescription">Описание</label>
+                    <textarea id="projectDescription"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="projectParent">Родительский проект</label>
+                    <select id="projectParent"></select>
+                </div>
+                <input type="hidden" id="projectId">
+                <div style="display: flex; gap: 1rem;">
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                    <button type="button" class="btn" onclick="closeModal('projectModal')">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Модальное окно для задачи -->
+    <div id="taskModal" class="modal">
+        <div class="modal-content">
+            <h2 id="taskModalTitle">Новая задача</h2>
+            <form id="taskForm">
+                <div class="form-group">
+                    <label for="taskName">Название</label>
+                    <input type="text" id="taskName" required>
+                </div>
+                <div class="form-group">
+                    <label for="taskDescription">Описание</label>
+                    <textarea id="taskDescription"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="taskProject">Проект</label>
+                    <select id="taskProject" required></select>
+                </div>
+                <div class="form-group">
+                    <label for="taskParent">Родительская задача</label>
+                    <select id="taskParent"></select>
+                </div>
+                <div class="form-group">
+                    <label for="taskPriority">Приоритет</label>
+                    <select id="taskPriority">
+                        <option value="low">Низкий</option>
+                        <option value="medium">Средний</option>
+                        <option value="high">Высокий</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="taskDueDate">Срок выполнения</label>
+                    <input type="date" id="taskDueDate">
+                </div>
+                <div class="form-group">
+                    <label for="taskProgress">Прогресс (%)</label>
+                    <input type="number" id="taskProgress" min="0" max="100" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="taskDependencies">Зависимости</label>
+                    <select id="taskDependencies" multiple></select>
+                </div>
+                <input type="hidden" id="taskId">
+                <div style="display: flex; gap: 1rem;">
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                    <button type="button" class="btn" onclick="closeModal('taskModal')">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    // Структура данных
+        let state = {
+            projects: [],
+            tasks: [],
+            currentView: null // {type: 'project'|'task', id: string}
+        };
+
+        // Генерация уникального ID
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2);
+        }
+
+        // Загрузка состояния
+        function loadState() {
+            renderProjectTree();
+            if (state.currentView) {
+                renderView(state.currentView);
+            }
+        }
+
+        // Сохранение состояния
+        function saveState() {
+            // При локальном использовании раскомментируйте:
+            // localStorage.setItem('taskManagerState', JSON.stringify(state));
+        }
+
+        // Поиск всех дочерних элементов (проектов или задач)
+        function findChildren(parentId, items) {
+            return items.filter(item => item.parentId === parentId);
+        }
+
+        // Получение полного пути к элементу
+        function getItemPath(itemId, type) {
+            const path = [];
+            let currentId = itemId;
+
+            while (currentId) {
+                let item;
+                if (type === 'task') {
+                    item = state.tasks.find(t => t.id === currentId);
+                    if (item && item.parentId) {
+                        path.unshift(item);
+                        currentId = item.parentId;
+                        continue;
+                    }
+                    if (item && item.projectId) {
+                        path.unshift(item);
+                        currentId = item.projectId;
+                        type = 'project';
+                        continue;
+                    }
+                } else {
+                    item = state.projects.find(p => p.id === currentId);
+                    if (item) {
+                        path.unshift(item);
+                        currentId = item.parentId;
+                    }
+                }
+                if (!item) break;
+            }
+
+            return path;
+        }
+
+        // Рендеринг дерева проектов
+        function renderProjectTree() {
+            const container = document.getElementById('projectTree');
+            container.innerHTML = '';
+
+            function renderProjectNode(project, level = 0) {
+                const div = document.createElement('div');
+                div.className = 'tree-item';
+
+                const content = document.createElement('div');
+                content.className = `tree-content ${state.currentView?.id === project.id ? 'active' : ''}`;
+                content.onclick = () => selectView({ type: 'project', id: project.id });
+
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = project.name;
+                content.appendChild(nameSpan);
+
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'tree-children';
+
+                // Добавляем подпроекты
+                const subprojects = findChildren(project.id, state.projects);
+                subprojects.forEach(subproject => {
+                    childrenContainer.appendChild(renderProjectNode(subproject, level + 1));
+                });
+
+                // Добавляем задачи верхнего уровня проекта
+                const tasks = state.tasks.filter(t => t.projectId === project.id && !t.parentId);
+                tasks.forEach(task => {
+                    childrenContainer.appendChild(renderTaskNode(task, level + 1));
+                });
+
+                div.appendChild(content);
+                if (subprojects.length > 0 || tasks.length > 0) {
+                    div.appendChild(childrenContainer);
+                }
+
+                return div;
+            }
+
+            function renderTaskNode(task, level = 0) {
+                const div = document.createElement('div');
+                div.className = 'tree-item';
+
+                const content = document.createElement('div');
+                content.className = `tree-content ${state.currentView?.id === task.id ? 'active' : ''}`;
+                content.onclick = () => selectView({ type: 'task', id: task.id });
+
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = task.name;
+                content.appendChild(nameSpan);
+
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'tree-children';
+
+                // Добавляем подзадачи
+                const subtasks = findChildren(task.id, state.tasks);
+                subtasks.forEach(subtask => {
+                    childrenContainer.appendChild(renderTaskNode(subtask, level + 1));
+                });
+
+                div.appendChild(content);
+                if (subtasks.length > 0) {
+                    div.appendChild(childrenContainer);
+                }
+
+                return div;
+            }
+
+            // Рендерим корневые проекты
+            const rootProjects = state.projects.filter(p => !p.parentId);
+            rootProjects.forEach(project => {
+                container.appendChild(renderProjectNode(project));
+            });
+        }
+
+        // Рендеринг хлебных крошек
+        function renderBreadcrumbs() {
+            const container = document.getElementById('breadcrumbs');
+            container.innerHTML = '';
+
+            if (!state.currentView) return;
+
+            const path = getItemPath(state.currentView.id, state.currentView.type);
+
+            path.forEach((item, index) => {
+                if (index > 0) {
+                    const separator = document.createElement('span');
+                    separator.className = 'breadcrumb-separator';
+                    separator.textContent = '>';
+                    container.appendChild(separator);
+                }
+
+                const span = document.createElement('span');
+                span.className = 'breadcrumb-item';
+                span.textContent = item.name;
+                span.onclick = () => selectView({
+                    type: item.hasOwnProperty('projectId') ? 'task' : 'project',
+                    id: item.id
+                });
+                container.appendChild(span);
+            });
+        }
+
+        // Выбор текущего представления (проект или задача)
+        function selectView(view) {
+            state.currentView = view;
+            renderProjectTree();
+            renderView(view);
+            renderBreadcrumbs();
+        }
+
+        // Рендеринг представления (проекта или задачи)
+        function renderView(view) {
+            const container = document.getElementById('projectView');
+
+            if (view.type === 'project') {
+                const project = state.projects.find(p => p.id === view.id);
+                if (!project) return;
+
+                // Получаем все задачи проекта (включая подзадачи)
+                const tasks = state.tasks.filter(t => t.projectId === project.id);
+                const completedTasks = tasks.filter(t => t.progress === 100).length;
+                const totalProgress = tasks.length ? Math.round((completedTasks / tasks.length) * 100) : 0;
+
+                container.innerHTML = `
+                        <div class="project-header">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <h2>${project.name}</h2>
+                                    <p>${project.description || ''}</p>
+                                </div>
+                                <div>
+                                    <button class="btn btn-primary" onclick="showTaskModal(null, '${project.id}')">
+                                        + Добавить задачу
+                                    </button>
+                                    <button class="btn btn-primary" onclick="showProjectModal('${project.id}')">
+                                        ✎ Редактировать
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="progress-container">
+                                <div class="progress-bar">
+                                    <div class="progress-bar-fill" style="width: ${totalProgress}%"></div>
+                                </div>
+                                <div style="text-align: right; font-size: 0.9rem;">
+                                    Прогресс: ${totalProgress}%
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="project-tasks">
+                            <h3>Задачи</h3>
+                            <div class="task-list">
+                                ${renderTasksList(tasks.filter(t => !t.parentId))}
+                            </div>
+                        </div>
+                    `;
+            } else if (view.type === 'task') {
+                const task = state.tasks.find(t => t.id === view.id);
+                if (!task) return;
+
+                container.innerHTML = `
+                        <div class="task-header">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <h2>${task.name}</h2>
+                                    <p>${task.description || ''}</p>
+                                </div>
+                                <div>
+                                    <button class="btn btn-primary" onclick="showTaskModal('${task.id}')">
+                                        ✎ Редактировать
+                                    </button>
+                                    <button class="btn btn-primary" onclick="showTaskModal(null, null, '${task.id}')">
+                                        + Добавить подзадачу
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="progress-container">
+                                <div class="progress-bar">
+                                    <div class="progress-bar-fill" style="width: ${task.progress}%"></div>
+                                </div>
+                                <div style="text-align: right; font-size: 0.9rem;">
+                                    Прогресс: ${task.progress}%
+                                </div>
+                            </div>
+
+                            <div class="task-details">
+                                <div class="badge badge-${getPriorityClass(task.priority)}">
+                                    ${getPriorityLabel(task.priority)}
+                                </div>
+                                ${task.dueDate ? `
+                                    <div class="badge badge-warning">
+                                        Срок: ${new Date(task.dueDate).toLocaleDateString()}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+
+                        <div class="task-relations">
+                            <h3>Зависимости</h3>
+                            ${renderTaskDependencies(task)}
+                        </div>
+
+                        <div class="subtasks">
+                            <h3>Подзадачи</h3>
+                            <div class="task-list">
+                                ${renderTasksList(findChildren(task.id, state.tasks))}
+                            </div>
+                        </div>
+                    `;
+            }
+        }
+
+        // Рендеринг списка задач
+        function renderTasksList(tasks) {
+            if (!tasks.length) {
+                return '<p>Нет задач</p>';
+            }
+
+            return tasks.map(task => `
+                    <div class="task-item">
+                        <div class="task-header">
+                            <span class="task-title" onclick="selectView({type: 'task', id: '${task.id}'})">
+                                ${task.name}
+                            </span>
+                            <div class="task-badges">
+                                <div class="badge badge-${getPriorityClass(task.priority)}">
+                                    ${getPriorityLabel(task.priority)}
+                                </div>
+                                ${task.dueDate ? `
+                                    <div class="badge badge-warning">
+                                        ${new Date(task.dueDate).toLocaleDateString()}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                        <div class="task-content">
+                            <div class="progress-bar">
+                                <div class="progress-bar-fill" style="width: ${task.progress}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+        }
+
+        // Рендеринг зависимостей задачи
+        function renderTaskDependencies(task) {
+            if (!task.dependencies || !task.dependencies.length) {
+                return '<p>Нет зависимостей</p>';
+            }
+
+            return task.dependencies.map(depId => {
+                const dep = state.tasks.find(t => t.id === depId);
+                if (!dep) return '';
+
+                return `
+                        <div class="relation-item">
+                            <span onclick="selectView({type: 'task', id: '${dep.id}'})">
+                                ${dep.name}
+                            </span>
+                            <div class="badge badge-${dep.progress === 100 ? 'success' : 'warning'}">
+                                ${dep.progress}%
+                            </div>
+                        </div>
+                    `;
+            }).join('');
+        }
+
+        // Получение класса приоритета
+        function getPriorityClass(priority) {
+            switch (priority) {
+                case 'high': return 'danger';
+                case 'medium': return 'warning';
+                case 'low': return 'primary';
+                default: return 'primary';
+            }
+        }
+
+        // Получение метки приоритета
+        function getPriorityLabel(priority) {
+            switch (priority) {
+                case 'high': return 'Высокий';
+                case 'medium': return 'Средний';
+                case 'low': return 'Низкий';
+                default: return 'Обычный';
+            }
+        }
+
+        // Модальное окно проекта
+        function showProjectModal(projectId = null) {
+            const modal = document.getElementById('projectModal');
+            const form = document.getElementById('projectForm');
+            const titleEl = document.getElementById('projectModalTitle');
+
+            // Очищаем форму
+            form.reset();
+
+            // Заполняем список родительских проектов
+            const parentSelect = document.getElementById('projectParent');
+            parentSelect.innerHTML = '<option value="">Нет</option>';
+
+            state.projects.forEach(p => {
+                if (p.id !== projectId) { // Исключаем текущий проект
+                    const option = document.createElement('option');
+                    option.value = p.id;
+                    option.textContent = p.name;
+                    parentSelect.appendChild(option);
+                }
+            });
+
+            // Если редактируем существующий проект
+            if (projectId) {
+                const project = state.projects.find(p => p.id === projectId);
+                if (project) {
+                    titleEl.textContent = 'Редактировать проект';
+                    document.getElementById('projectId').value = project.id;
+                    document.getElementById('projectName').value = project.name;
+                    document.getElementById('projectDescription').value = project.description || '';
+                    document.getElementById('projectParent').value = project.parentId || '';
+                }
+            } else {
+                titleEl.textContent = 'Новый проект';
+                document.getElementById('projectId').value = '';
+            }
+
+            modal.style.display = 'block';
+        }
+
+        // Модальное окно задачи
+        function showTaskModal(taskId = null, projectId = null, parentTaskId = null) {
+            const modal = document.getElementById('taskModal');
+            const form = document.getElementById('taskForm');
+            const titleEl = document.getElementById('taskModalTitle');
+
+            // Очищаем форму
+            form.reset();
+
+            // Заполняем список проектов
+            const projectSelect = document.getElementById('taskProject');
+            projectSelect.innerHTML = '';
+            state.projects.forEach(p => {
+                const option = document.createElement('option');
+                option.
+
+                    // ... (продолжение после предыдущего кода)
+
+                    value = projectId;
+                option.textContent = p.name;
+                projectSelect.appendChild(option);
+            });
+
+            // Заполняем список родительских задач
+            const parentTaskSelect = document.getElementById('taskParent');
+            parentTaskSelect.innerHTML = '<option value="">Нет</option>';
+
+            state.tasks.forEach(t => {
+                if (t.id !== taskId && t.projectId === (projectId || t.projectId)) {
+                    const option = document.createElement('option');
+                    option.value = t.id;
+                    option.textContent = t.name;
+                    parentTaskSelect.appendChild(option);
+                }
+            });
+
+            // Заполняем зависимости
+            const dependenciesSelect = document.getElementById('taskDependencies');
+            dependenciesSelect.innerHTML = '';
+
+            state.tasks.forEach(t => {
+                if (t.id !== taskId) {
+                    const option = document.createElement('option');
+                    option.value = t.id;
+                    option.textContent = t.name;
+                    dependenciesSelect.appendChild(option);
+                }
+            });
+
+            // Если редактируем существующую задачу
+            if (taskId) {
+                const task = state.tasks.find(t => t.id === taskId);
+                if (task) {
+                    titleEl.textContent = 'Редактировать задачу';
+                    document.getElementById('taskId').value = task.id;
+                    document.getElementById('taskName').value = task.name;
+                    document.getElementById('taskDescription').value = task.description || '';
+                    document.getElementById('taskProject').value = task.projectId;
+                    document.getElementById('taskParent').value = task.parentId || '';
+                    document.getElementById('taskPriority').value = task.priority;
+                    document.getElementById('taskDueDate').value = task.dueDate || '';
+                    document.getElementById('taskProgress').value = task.progress;
+
+                    if (task.dependencies) {
+                        Array.from(dependenciesSelect.options).forEach(option => {
+                            option.selected = task.dependencies.includes(option.value);
+                        });
+                    }
+                }
+            } else {
+                titleEl.textContent = parentTaskId ? 'Новая подзадача' : 'Новая задача';
+                document.getElementById('taskId').value = '';
+                document.getElementById('taskProject').value = projectId || '';
+                document.getElementById('taskParent').value = parentTaskId || '';
+            }
+
+            modal.style.display = 'block';
+        }
+
+        // Закрытие модального окна
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // Обработчик формы проекта
+        document.getElementById('projectForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const project = {
+                id: document.getElementById('projectId').value || generateId(),
+                name: document.getElementById('projectName').value,
+                description: document.getElementById('projectDescription').value,
+                parentId: document.getElementById('projectParent').value || null,
+                createdAt: new Date().toISOString()
+            };
+
+            // Обновление или добавление проекта
+            const index = state.projects.findIndex(p => p.id === project.id);
+            if (index > -1) {
+                state.projects[index] = project;
+            } else {
+                state.projects.push(project);
+            }
+
+            closeModal('projectModal');
+            saveState();
+            loadState();
+        });
+
+        // Обработчик формы задачи
+        document.getElementById('taskForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const task = {
+                id: document.getElementById('taskId').value || generateId(),
+                name: document.getElementById('taskName').value,
+                description: document.getElementById('taskDescription').value,
+                projectId: document.getElementById('taskProject').value,
+                parentId: document.getElementById('taskParent').value || null,
+                priority: document.getElementById('taskPriority').value,
+                dueDate: document.getElementById('taskDueDate').value || null,
+                progress: parseInt(document.getElementById('taskProgress').value),
+                dependencies: Array.from(document.getElementById('taskDependencies').selectedOptions)
+                    .map(option => option.value),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                files: [],
+                comments: [],
+                checklist: []
+            };
+
+            // Обновление или добавление задачи
+            const index = state.tasks.findIndex(t => t.id === task.id);
+            if (index > -1) {
+                state.tasks[index] = task;
+            } else {
+                state.tasks.push(task);
+            }
+
+            closeModal('taskModal');
+            saveState();
+            loadState();
+        });
+
+        // Инициализация приложения
+        function init() {
+            // Попытка загрузки из localStorage
+            const savedState = localStorage.getItem('taskManagerState');
+            if (savedState) {
+                state = JSON.parse(savedState);
+            }
+
+            // Начальные данные для тестирования
+            if (!state.projects.length) {
+                state.projects.push({
+                    id: 'root',
+                    name: 'Мои проекты',
+                    parentId: null,
+                    createdAt: new Date().toISOString()
+                });
+            }
+
+            loadState();
+        }
+
+        // Запуск приложения
+        init();
+
+        // Добавим базовые функции для управления файлами
+        function handleFileUpload(taskId, files) {
+            const task = state.tasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    task.files.push({
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                        data: e.target.result,
+                        uploadedAt: new Date().toISOString()
+                    });
+                    saveState();
+                    renderView(state.currentView);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        
+            // Оптимизированный код с использованием шаблонов
+            const templates = {
+                projectView: (project, tasks) => `
+            <div class="project-header">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <h2 class="text-2xl font-bold">${project.name}</h2>
+                        ${project.description ? `<p class="text-gray-600 mt-2">${project.description}</p>` : ''}
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="showTaskModal(null, '${project.id}')">
+                            + Задача
+                        </button>
+                        <button class="btn btn-primary" onclick="showProjectModal('${project.id}')">
+                            ✎ Редактировать
+                        </button>
+                    </div>
+                </div>
+                ${renderProgress(tasks)}
+            </div>
+            <div class="mt-6">
+                <h3 class="text-xl font-semibold mb-4">Задачи</h3>
+                ${tasks.length ? renderTaskList(tasks) : '<p class="text-gray-500">Нет задач</p>'}
+            </div>
+            `,
+
+                taskItem: (task) => `
+            <div class="task-item" onclick="selectView({type: 'task', id: '${task.id}'})">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h4 class="font-semibold">${task.name}</h4>
+                        ${task.description ? `<p class="text-sm text-gray-600 mt-1">${task.description}</p>` : ''}
+                    </div>
+                    <div class="flex gap-2">
+                        ${task.dueDate ? `
+                                    <div class="badge badge-warning">
+                                        ${new Date(task.dueDate).toLocaleDateString()}
+                                    </div>
+                                ` : ''}
+                        <div class="badge badge-${getPriorityClass(task.priority)}">
+                            ${getPriorityLabel(task.priority)}
+                        </div>
+                    </div>
+                </div>
+                ${renderTaskProgress(task)}
+            </div>
+            `
+            };
+
+            // Оптимизированные функции рендеринга
+            function renderProjectTree() {
+                const container = document.getElementById('projectTree');
+            container.innerHTML = renderTree(state.projects, state.tasks);
+            }
+
+            function renderTree(projects, tasks, parentId = null, level = 0) {
+                const items = projects.filter(p => p.parentId === parentId);
+            if (!items.length) return '';
+
+            return `
+            <ul class="tree-view">
+                ${items.map(item => `
+                            <li class="tree-item">
+                                <div class="tree-content ${state.currentView?.id === item.id ? 'active' : ''}"
+                                     onclick="selectView({type: 'project', id: '${item.id}'})">
+                                    ${item.name}
+                                </div>
+                                ${renderTree(projects, tasks, item.id, level + 1)}
+                                ${renderTaskTree(tasks.filter(t => t.projectId === item.id && !t.parentId), level + 1)}
+                            </li>
+                        `).join('')}
+            </ul>
+            `;
+            }
+
+            function renderTaskTree(tasks, level = 0) {
+                if (!tasks.length) return '';
+
+            return `
+            <ul class="tree-view">
+                ${tasks.map(task => `
+                            <li class="tree-item">
+                                <div class="tree-content ${state.currentView?.id === task.id ? 'active' : ''}"
+                                     onclick="selectView({type: 'task', id: '${task.id}'})">
+                                    ${task.name}
+                                </div>
+                                ${renderTaskTree(findChildren(task.id, state.tasks), level + 1)}
+                            </li>
+                        `).join('')}
+            </ul>
+            `;
+            }
+
+            // Остальной код остается аналогичным, но с использованием шаблонов
+            // Добавляем обработчики для кнопок
+            document.addEventListener('DOMContentLoaded', () => {
+                document.getElementById('newProjectBtn').addEventListener('click', () => showProjectModal());
+                document.getElementById('newTaskBtn').addEventListener('click', () => showTaskModal());
+            });
+
+            // Добавляем новый функционал
+            function exportToJSON() {
+                const data = JSON.stringify(state, null, 2);
+            const blob = new Blob([data], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'tasks-export.json';
+            a.click();
+            }
+
+            function importFromJSON(event) {
+                const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                    try {
+                        const data = JSON.parse(e.target.result);
+            state = data;
+            saveState();
+            loadState();
+                    } catch (error) {
+                alert('Ошибка при импорте файла');
+                    }
+                };
+            reader.readAsText(file);
+            }
+
+            // Инициализация
+            init();
+
+
+        // Добавим базовый функционал комментариев
+        function addComment(taskId, text) {
+            const task = state.tasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            task.comments.push({
+                id: generateId(),
+                text: text,
+                author: 'User',
+                createdAt: new Date().toISOString()
+            });
+            saveState();
+            renderView(state.currentView);
+        }
+
+        // Пример реализации истории изменений
+        function updateTaskHistory(taskId, action) {
+            const task = state.tasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            task.history = task.history || [];
+            task.history.push({
+                action: action,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // Инициализация обработчиков
+        document.addEventListener('DOMContentLoaded', () => {
+            // Делегирование событий для динамических элементов
+            document.body.addEventListener('click', function(e) {
+                if (e.target.closest('.action-delete')) {
+                    const taskId = e.target.dataset.taskId;
+                    if (confirm('Удалить задачу?')) {
+                        state.tasks = state.tasks.filter(t => t.id !== taskId);
+                        saveState();
+                        loadState();
+                    }
+                }
+            });
+        });</script>
+</body>
+</html>
