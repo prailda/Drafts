@@ -1,0 +1,143 @@
+Attribute VB_Name = "UIModule"
+' Модуль UIModule
+' Предоставляет функции для взаимодействия с пользовательским интерфейсом
+
+Option Explicit
+
+' Типы действий при дублировании имени
+Public Enum DuplicateNameAction
+    DuplicateAddSuffix = 1    ' Добавить суффикс
+    DuplicateSkip = 2         ' Пропустить
+    DuplicateCancel = 3       ' Отменить операцию
+End Enum
+
+' Типы действий при некорректном имени
+Public Enum InvalidNameAction
+    InvalidNameClean = 1      ' Очистить недопустимые символы
+    InvalidNameRename = 2     ' Задать новое имя
+    InvalidNameCancel = 3     ' Отменить операцию
+End Enum
+
+' Показать сообщение об ошибке
+Public Function ShowErrorMessage(ByVal Message As String, Optional ByVal Title As String = "Ошибка") As VbMsgBoxResult
+    On Error Resume Next
+    ShowErrorMessage = MsgBox(Message, vbExclamation + vbOKOnly, Title)
+End Function
+
+' Показать информационное сообщение
+Public Function ShowInfoMessage(ByVal Message As String, Optional ByVal Title As String = "Информация") As VbMsgBoxResult
+    On Error Resume Next
+    ShowInfoMessage = MsgBox(Message, vbInformation + vbOKOnly, Title)
+End Function
+
+' Запрос подтверждения
+Public Function ShowConfirmMessage(ByVal Message As String, Optional ByVal Title As String = "Подтверждение") As VbMsgBoxResult
+    On Error Resume Next
+    ShowConfirmMessage = MsgBox(Message, vbQuestion + vbYesNo, Title)
+End Function
+
+' Показать диалог обработки дублирования имени
+Public Function ShowDuplicateNameDialog(ByVal ObjectName As String, Optional ByVal ObjectType As String = "объект") As DuplicateNameAction
+    On Error Resume Next
+    
+    ' Предложение пользователю выбрать действие
+    Dim msg As String
+    msg = ObjectType & " с именем '" & ObjectName & "' уже существует." & vbCrLf & vbCrLf & _
+          "Выберите действие:" & vbCrLf & _
+          "- [Да] Добавить суффикс к имени" & vbCrLf & _
+          "- [Нет] Пропустить этот объект" & vbCrLf & _
+          "- [Отмена] Отменить операцию"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNoCancel, "Дублирование имени")
+    
+    Select Case response
+        Case vbYes
+            ShowDuplicateNameDialog = DuplicateAddSuffix
+        Case vbNo
+            ShowDuplicateNameDialog = DuplicateSkip
+        Case Else
+            ShowDuplicateNameDialog = DuplicateCancel
+    End Select
+End Function
+
+' Показать диалог обработки некорректного имени
+Public Function ShowInvalidNameDialog(ByVal InvalidName As String, Optional ByVal ObjectType As String = "объект") As InvalidNameAction
+    On Error Resume Next
+    
+    ' Предложение пользователю выбрать действие
+    Dim msg As String
+    msg = "Имя " & ObjectType & " '" & InvalidName & "' содержит недопустимые символы." & vbCrLf & vbCrLf & _
+          "Выберите действие:" & vbCrLf & _
+          "- [Да] Автоматически удалить недопустимые символы" & vbCrLf & _
+          "- [Нет] Задать новое имя вручную" & vbCrLf & _
+          "- [Отмена] Отменить операцию"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNoCancel, "Некорректное имя")
+    
+    Select Case response
+        Case vbYes
+            ShowInvalidNameDialog = InvalidNameClean
+        Case vbNo
+            ShowInvalidNameDialog = InvalidNameRename
+        Case Else
+            ShowInvalidNameDialog = InvalidNameCancel
+    End Select
+End Function
+
+' Показать диалог ошибки доступа к файлу
+Public Function ShowFileAccessErrorDialog(ByVal FilePath As String, Optional ByVal Operation As String = "доступ к") As Boolean
+    On Error Resume Next
+    
+    ' Предложение пользователю выбрать действие
+    Dim msg As String
+    msg = "Ошибка при " & Operation & " файлу:" & vbCrLf & FilePath & vbCrLf & vbCrLf & _
+          "Возможные причины:" & vbCrLf & _
+          "- Файл не существует" & vbCrLf & _
+          "- Недостаточно прав доступа" & vbCrLf & _
+          "- Файл используется другим процессом" & vbCrLf & vbCrLf & _
+          "Продолжить выполнение операции?"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNo, "Ошибка доступа к файлу")
+    
+    ShowFileAccessErrorDialog = (response = vbYes)
+End Function
+
+' Показать диалог ошибки доступа к VBA
+Public Function ShowVBAAccessErrorDialog() As Boolean
+    On Error Resume Next
+    
+    ' Вывод инструкций пользователю
+    Dim msg As String
+    msg = "Для работы программы необходимо разрешить доступ к объектной модели VBA." & vbCrLf & vbCrLf & _
+          "Для этого выполните следующие действия:" & vbCrLf & _
+          "1. Закройте это окно" & vbCrLf & _
+          "2. Откройте меню Файл - Параметры" & vbCrLf & _
+          "3. Перейдите в раздел Центр управления безопасностью" & vbCrLf & _
+          "4. Нажмите кнопку Параметры центра управления безопасностью" & vbCrLf & _
+          "5. Перейдите в раздел Параметры макросов" & vbCrLf & _
+          "6. Установите флажок Доступ к объектной модели VBA" & vbCrLf & _
+          "7. Нажмите ОК и перезапустите приложение" & vbCrLf & vbCrLf & _
+          "Хотите открыть настройки безопасности сейчас?"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNo, "Ошибка доступа к VBA")
+    
+    If response = vbYes Then
+        ' Открытие диалога настроек безопасности
+        On Error Resume Next
+        Application.CommandBars.ExecuteMso "SecurityOptions"
+    End If
+    
+    ShowVBAAccessErrorDialog = False
+End Function
+
+' Запрос ввода текста у пользователя
+Public Function InputTextDialog(ByVal Prompt As String, Optional ByVal Title As String = "Ввод", _
+                              Optional ByVal DefaultValue As String = "") As String
+    On Error Resume Next
+    InputTextDialog = InputBox(Prompt, Title, DefaultValue)
+End Function
+

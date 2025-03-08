@@ -1,0 +1,312 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "ErrorHandler"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+' Класс ErrorHandler
+' Обеспечивает централизованную обработку ошибок приложения
+
+Option Explicit
+
+' Константы
+Private Const MODULE_NAME As String = "ErrorHandler"
+
+' Свойства
+Private m_Logger As Object
+Private m_ShowErrors As Boolean
+Private m_LogErrors As Boolean
+Private m_DetailedErrorInfo As Boolean
+
+' Инициализация
+Private Sub Class_Initialize()
+    ' Инициализация логгера
+    Set m_Logger = GetLogger()
+    
+    ' Установка значений по умолчанию
+    m_ShowErrors = True
+    m_LogErrors = True
+    m_DetailedErrorInfo = True
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "ErrorHandler инициализирован", MODULE_NAME
+        Else
+            Debug.Print "ВНИМАНИЕ: Logger не инициализирован при инициализации ErrorHandler"
+        End If
+    End If
+End Sub
+
+' Основной метод обработки ошибок
+Public Function HandleError(ByVal ErrorNumber As Long, ByVal ErrorDescription As String, _
+                           ByVal Source As String, ByVal LineNumber As Long, _
+                           Optional ByVal ShowUser As Boolean = True, _
+                           Optional ByVal AdditionalInfo As String = "") As Boolean
+    On Error Resume Next
+    
+    ' Формирование сообщения об ошибке
+    Dim errorMsg As String
+    Dim detailedMsg As String
+    
+    ' Основное сообщение
+    errorMsg = "Ошибка #" & ErrorNumber & ": " & ErrorDescription
+    
+    ' Добавление источника и номера строки
+    If Len(Source) > 0 Then
+        errorMsg = errorMsg & vbCrLf & "В модуле: " & Source
+    End If
+    
+    If LineNumber > 0 Then
+        errorMsg = errorMsg & ", строка: " & LineNumber
+    End If
+    
+    ' Добавление дополнительной информации
+    If Len(AdditionalInfo) > 0 Then
+        errorMsg = errorMsg & vbCrLf & "Дополнительная информация: " & AdditionalInfo
+    End If
+    
+    ' Детализированное сообщение для логов
+    If m_DetailedErrorInfo Then
+        detailedMsg = errorMsg & vbCrLf & _
+                   "Время: " & Now & vbCrLf & _
+                   "Пользователь: " & Environ("USERNAME") & vbCrLf & _
+                   "Компьютер: " & Environ("COMPUTERNAME") & vbCrLf & _
+                   "Excel версия: " & Application.Version
+    Else
+        detailedMsg = errorMsg
+    End If
+    
+    ' Логирование ошибки
+    If m_LogErrors Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Error detailedMsg, IIf(Len(Source) > 0, Source, MODULE_NAME)
+            End If
+        End If
+    End If
+    
+    ' Вывод сообщения пользователю - теперь через UIModule
+    If m_ShowErrors And ShowUser Then
+        If UIModule.ShowErrorMessage(errorMsg, "Ошибка приложения") = vbOK Then
+            ' Пользователь ознакомился с ошибкой
+        End If
+    End If
+    
+    ' Успешная обработка
+    HandleError = True
+End Function
+
+' Специальные обработчики типовых ошибок - делегирование к UIModule
+Public Function HandleDuplicateNameError(ByVal ObjectName As String, Optional ByVal ObjectType As String = "объект") As DuplicateNameAction
+    On Error GoTo ErrorHandler
+    
+    ' Логирование ошибки дублирования имени
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Warning "Объект с именем '" & ObjectName & "' уже существует", MODULE_NAME
+        End If
+    End If
+    
+    If Not m_ShowErrors Then
+        HandleDuplicateNameError = DuplicateAddSuffix
+        Exit Function
+    End If
+    
+    ' Делегирование к UIModule
+    HandleDuplicateNameError = UIModule.ShowDuplicateNameDialog(ObjectName, ObjectType)
+    
+    Exit Function
+    
+ErrorHandler:
+    Debug.Print "Ошибка при обработке дублирования имени: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+    HandleDuplicateNameError = DuplicateCancel
+    Resume Next
+End Function
+
+Public Function HandleInvalidNameError(ByVal InvalidName As String, Optional ByVal ObjectType As String = "объект") As InvalidNameAction
+    On Error GoTo ErrorHandler
+    
+    ' Логирование ошибки некорректного имени
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Warning "Некорректное имя '" & InvalidName & "' содержит недопустимые символы", MODULE_NAME
+        End If
+    End If
+    
+    If Not m_ShowErrors Then
+        HandleInvalidNameError = InvalidNameClean
+        Exit Function
+    End If
+    
+    ' Делегирование к UIModule
+    HandleInvalidNameError = UIModule.ShowInvalidNameDialog(InvalidName, ObjectType)
+    
+    Exit Function
+    
+ErrorHandler:
+    Debug.Print "Ошибка при обработке некорректного имени: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+    HandleInvalidNameError = InvalidNameCancel
+    Resume Next
+End Function
+
+Public Function HandleFileAccessError(ByVal FilePath As String, Optional ByVal Operation As String = "доступ к") As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Логирование ошибки доступа к файлу
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Error "Ошибка при " & Operation & " файлу: " & FilePath, MODULE_NAME
+        End If
+    End If
+    
+    If Not m_ShowErrors Then
+        HandleFileAccessError = False
+        Exit Function
+    End If
+    
+    ' Делегирование к UIModule
+    HandleFileAccessError = UIModule.ShowFileAccessErrorDialog(FilePath, Operation)
+    
+    Exit Function
+    
+ErrorHandler:
+    Debug.Print "Ошибка при обработке ошибки доступа к файлу: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+    HandleFileAccessError = False
+    Resume Next
+End Function
+
+Public Function HandleVBAAccessError() As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Логирование ошибки доступа к VBA
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Error "Ошибка доступа к объектной модели VBA. Необходимо включить доступ в настройках безопасности.", MODULE_NAME
+        End If
+    End If
+    
+    If Not m_ShowErrors Then
+        HandleVBAAccessError = False
+        Exit Function
+    End If
+    
+    ' Делегирование к UIModule
+    HandleVBAAccessError = UIModule.ShowVBAAccessErrorDialog()
+    
+    HandleVBAAccessError = False
+    Exit Function
+    
+ErrorHandler:
+    Debug.Print "Ошибка при обработке ошибки доступа к VBA: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+    HandleVBAAccessError = False
+    Resume Next
+End Function
+
+' Проверка доступа к VBA
+Public Function IsVBAAccessEnabled() As Boolean
+    On Error Resume Next
+    
+    Dim testWB As Workbook
+    Set testWB = ActiveWorkbook
+    If testWB Is Nothing Then
+        Set testWB = Workbooks.Add
+        testWB.Close SaveChanges:=False
+        IsVBAAccessEnabled = False
+        Exit Function
+    End If
+    
+    ' Попытка доступа к VBA-проекту
+    Dim testAccess As Boolean
+    testAccess = (Not testWB.VBProject Is Nothing)
+    
+    If Err.Number <> 0 Then
+        IsVBAAccessEnabled = False
+    Else
+        IsVBAAccessEnabled = True
+    End If
+End Function
+
+' Настройка параметров обработчика ошибок
+Public Sub Configure(Optional ByVal ShowErrors As Variant, Optional ByVal LogErrors As Variant, _
+                      Optional ByVal DetailedErrorInfo As Variant)
+    On Error GoTo ErrorHandler
+    
+    ' Обновление параметров, если они переданы
+    If Not IsMissing(ShowErrors) Then
+        m_ShowErrors = CBool(ShowErrors)
+    End If
+    
+    If Not IsMissing(LogErrors) Then
+        m_LogErrors = CBool(LogErrors)
+    End If
+    
+    If Not IsMissing(DetailedErrorInfo) Then
+        m_DetailedErrorInfo = CBool(DetailedErrorInfo)
+    End If
+    
+    ' Логирование изменений
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Конфигурация ErrorHandler обновлена: " & _
+                    "ShowErrors=" & m_ShowErrors & ", " & _
+                    "LogErrors=" & m_LogErrors & ", " & _
+                    "DetailedErrorInfo=" & m_DetailedErrorInfo, MODULE_NAME
+        End If
+    End If
+    
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "Ошибка при настройке ErrorHandler: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+    Resume Next
+End Sub
+
+' Свойства
+Public Property Get ShowErrors() As Boolean
+    ShowErrors = m_ShowErrors
+End Property
+
+Public Property Let ShowErrors(ByVal Value As Boolean)
+    m_ShowErrors = Value
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Параметр ShowErrors установлен в " & Value, MODULE_NAME
+        End If
+    End If
+End Property
+
+Public Property Get LogErrors() As Boolean
+    LogErrors = m_LogErrors
+End Property
+
+Public Property Let LogErrors(ByVal Value As Boolean)
+    m_LogErrors = Value
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Параметр LogErrors установлен в " & Value, MODULE_NAME
+        End If
+    End If
+End Property
+
+Public Property Get DetailedErrorInfo() As Boolean
+    DetailedErrorInfo = m_DetailedErrorInfo
+End Property
+
+Public Property Let DetailedErrorInfo(ByVal Value As Boolean)
+    m_DetailedErrorInfo = Value
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Параметр DetailedErrorInfo установлен в " & Value, MODULE_NAME
+        End If
+    End If
+End Property
+
+' Освобождение ресурсов
+Private Sub Class_Terminate()
+    On Error Resume Next
+    Set m_Logger = Nothing
+End Sub
+

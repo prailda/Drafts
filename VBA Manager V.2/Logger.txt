@@ -1,0 +1,357 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "Logger"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+' Класс Logger
+' Обеспечивает логирование в текстовый файл и окно Immediate Window
+
+Option Explicit
+
+' Константы
+Private Const MODULE_NAME As String = "Logger"
+Private Const DEFAULT_LOG_FILENAME As String = "ExcellentLogs.txt"
+
+' Перечисление уровней логирования
+Public Enum LogLevel
+    LogDebug = 0
+    LogInfo = 1
+    LogWarning = 2
+    LogError = 3
+    LogSuccess = 4
+End Enum
+
+' Свойства конфигурации
+Private m_LogsIsEnable As Boolean
+Private m_LogLevel As LogLevel
+Private m_LogProviderTextIsEnable As Boolean
+Private m_LogProviderImmediateIsEnable As Boolean
+Private m_LogFullFilePath As String
+Private m_IsLoggerInitialized As Boolean
+Private m_LogMaximumFileSize As Long
+
+' Инициализация
+Private Sub Class_Initialize()
+    ' Установка значений по умолчанию
+    m_LogsIsEnable = True
+    m_LogLevel = LogDebug
+    m_LogProviderTextIsEnable = True
+    m_LogProviderImmediateIsEnable = True
+    m_IsLoggerInitialized = False
+    m_LogMaximumFileSize = 52428800 ' 50 МБ
+End Sub
+
+' Инициализация логгера с параметрами
+Public Function Initialize(ByVal logFilePath As String, Optional ByVal TextLogEnabled As Boolean = True, _
+                           Optional ByVal ImmediateLogEnabled As Boolean = True, _
+                           Optional ByVal MinLogLevel As LogLevel = LogDebug) As Boolean
+    On Error GoTo ErrorHandler
+    
+    m_LogsIsEnable = True
+    m_LogLevel = MinLogLevel
+    m_LogProviderTextIsEnable = TextLogEnabled
+    m_LogProviderImmediateIsEnable = ImmediateLogEnabled
+    m_LogFullFilePath = logFilePath
+    
+    If m_LogProviderTextIsEnable Then
+        ' Проверка возможности записи в файл лога
+        If Not FileUtils.FileExists(m_LogFullFilePath) Then
+            ' Создание каталога для лог-файла
+            Dim logDir As String
+            logDir = FileUtils.GetDirectoryPath(m_LogFullFilePath)
+            
+            If Not FileUtils.DirectoryExists(logDir) Then
+                If Not FileUtils.CreateDirectoryRecursive(logDir) Then
+                    m_LogProviderTextIsEnable = False
+                    Debug.Print "ПРЕДУПРЕЖДЕНИЕ: Не удалось создать каталог для логов: " & logDir
+                End If
+            End If
+        End If
+        
+        ' Попытка записи в файл для проверки доступа
+        Dim fileNum As Integer
+        On Error Resume Next
+        fileNum = FreeFile
+        Open m_LogFullFilePath For Append As #fileNum
+        
+        If Err.Number <> 0 Then
+            m_LogProviderTextIsEnable = False
+            Debug.Print "ПРЕДУПРЕЖДЕНИЕ: Не удалось получить доступ к файлу лога: " & m_LogFullFilePath
+        Else
+            Close #fileNum
+        End If
+        On Error GoTo ErrorHandler
+    End If
+    
+    m_IsLoggerInitialized = True
+    
+    ' Запись начального сообщения в лог
+    If m_LogProviderImmediateIsEnable Then
+        Debug.Print FormatLogMessage("Система логирования инициализирована", LogInfo)
+    End If
+    
+    If m_LogProviderTextIsEnable Then
+        WriteToLogFile "Система логирования инициализирована", LogInfo
+    End If
+    
+    Initialize = True
+    Exit Function
+    
+ErrorHandler:
+    Debug.Print "Ошибка при инициализации логгера: " & Err.Number & " - " & Err.Description
+    Initialize = False
+    Resume Next
+End Function
+
+' Методы логирования для различных уровней
+Public Sub Log_Debug(ByVal Message As String, Optional ByVal Source As String = "")
+    Log Message, LogDebug, Source
+End Sub
+
+Public Sub Log_Info(ByVal Message As String, Optional ByVal Source As String = "")
+    Log Message, LogInfo, Source
+End Sub
+
+Public Sub Log_Warning(ByVal Message As String, Optional ByVal Source As String = "")
+    Log Message, LogWarning, Source
+End Sub
+
+Public Sub Log_Error(ByVal Message As String, Optional ByVal Source As String = "")
+    Log Message, LogError, Source
+End Sub
+
+Public Sub Log_Success(ByVal Message As String, Optional ByVal Source As String = "")
+    Log Message, LogSuccess, Source
+End Sub
+
+' Основной метод логирования
+Public Sub Log(ByVal Message As String, ByVal Level As LogLevel, Optional ByVal Source As String = "")
+    On Error GoTo ErrorHandler
+    
+    ' Проверка инициализации
+    If Not m_IsLoggerInitialized Then
+        Debug.Print "ОШИБКА: Логгер не инициализирован!"
+        Exit Sub
+    End If
+    
+    ' Проверка уровня логирования
+    If Not m_LogsIsEnable Or Level < m_LogLevel Then Exit Sub
+    
+    ' Форматирование сообщения
+    Dim formattedMessage As String
+    formattedMessage = Message
+    
+    If Len(Source) > 0 Then
+        formattedMessage = "[" & Source & "] " & formattedMessage
+    End If
+    
+    ' Логирование в Immediate Window
+    If m_LogProviderImmediateIsEnable Then
+        Debug.Print FormatLogMessage(formattedMessage, Level)
+    End If
+    
+    ' Логирование в файл
+    If m_LogProviderTextIsEnable Then
+        WriteToLogFile formattedMessage, Level
+    End If
+    
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "Ошибка при логировании: " & Err.Number & " - " & Err.Description & " в строке " & Erl
+    Resume Next
+End Sub
+
+' Форматирование сообщения для вывода
+Private Function FormatLogMessage(ByVal Message As String, ByVal Level As LogLevel) As String
+    On Error Resume Next
+    
+    Dim timeStamp As String
+    timeStamp = Format(Now, "yyyy-mm-dd hh:mm:ss")
+    
+    Dim levelName As String
+    levelName = GetLevelName(Level)
+    
+    FormatLogMessage = timeStamp & " [" & levelName & "] " & Message
+End Function
+
+' Получение текстового представления уровня логирования
+Private Function GetLevelName(ByVal Level As LogLevel) As String
+    Select Case Level
+        Case LogDebug:    GetLevelName = "DEBUG"
+        Case LogInfo:     GetLevelName = "INFO"
+        Case LogWarning:  GetLevelName = "WARNING"
+        Case LogError:    GetLevelName = "ERROR"
+        Case LogSuccess:  GetLevelName = "SUCCESS"
+        Case Else:        GetLevelName = "UNKNOWN"
+    End Select
+End Function
+
+' Запись в файл лога
+Private Sub WriteToLogFile(ByVal Message As String, ByVal Level As LogLevel)
+    On Error GoTo ErrorHandler
+    
+    ' Проверка размера файла
+    If FileUtils.FileExists(m_LogFullFilePath) Then
+        If FileLen(m_LogFullFilePath) > m_LogMaximumFileSize Then
+            RotateLogFile
+        End If
+    End If
+    
+    ' Запись в файл
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    
+    Open m_LogFullFilePath For Append As #fileNum
+        Print #fileNum, FormatLogMessage(Message, Level)
+    Close #fileNum
+    
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "Ошибка при записи в файл лога: " & Err.Number & " - " & Err.Description
+    ' Отключение текстового провайдера при ошибке
+    m_LogProviderTextIsEnable = False
+    Resume Next
+End Sub
+
+' Ротация лог-файла при превышении размера
+Private Sub RotateLogFile()
+    On Error GoTo ErrorHandler
+    
+    ' Создание имени архивного файла
+    Dim archiveFileName As String
+    archiveFileName = Left(m_LogFullFilePath, Len(m_LogFullFilePath) - 4) & "_" & _
+                     Format(Now, "yyyymmdd_hhnnss") & ".txt"
+    
+    ' Закрытие файла перед переименованием
+    Close
+    
+    ' Переименование текущего файла
+    Name m_LogFullFilePath As archiveFileName
+    
+    ' Создание нового файла
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    
+    Open m_LogFullFilePath For Output As #fileNum
+        Print #fileNum, FormatLogMessage("Начало нового файла логов после ротации", LogInfo)
+    Close #fileNum
+    
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "Ошибка при ротации лог-файла: " & Err.Number & " - " & Err.Description
+    Resume Next
+End Sub
+
+' Методы для изменения конфигурации
+Public Sub SetLogLevel(ByVal Level As LogLevel)
+    m_LogLevel = Level
+    If m_IsLoggerInitialized Then
+        Log_Info "Установлен уровень логирования: " & GetLevelName(Level)
+    End If
+End Sub
+
+Public Sub EnableLogging(ByVal Enable As Boolean)
+    m_LogsIsEnable = Enable
+    If m_IsLoggerInitialized Then
+        If Enable Then
+            Log_Info "Логирование включено"
+        Else
+            Debug.Print FormatLogMessage("Логирование отключено", LogInfo)
+        End If
+    End If
+End Sub
+
+Public Sub EnableTextProvider(ByVal Enable As Boolean)
+    m_LogProviderTextIsEnable = Enable
+    If m_IsLoggerInitialized Then
+        If Enable Then
+            Log_Info "Текстовый провайдер логирования включен"
+        Else
+            Log_Info "Текстовый провайдер логирования отключен"
+        End If
+    End If
+End Sub
+
+Public Sub EnableImmediateProvider(ByVal Enable As Boolean)
+    m_LogProviderImmediateIsEnable = Enable
+    If m_IsLoggerInitialized And Enable Then
+        Debug.Print FormatLogMessage("Immediate провайдер логирования включен", LogInfo)
+    End If
+End Sub
+
+' Методы для очистки и обслуживания логов
+Public Sub ClearLogs()
+    On Error GoTo ErrorHandler
+    
+    If m_LogProviderTextIsEnable And FileUtils.FileExists(m_LogFullFilePath) Then
+        Close ' Закрытие всех открытых файлов
+        
+        ' Создание имени архивного файла
+        Dim archiveFileName As String
+        archiveFileName = Left(m_LogFullFilePath, Len(m_LogFullFilePath) - 4) & "_" & _
+                         Format(Now, "yyyymmdd_hhnnss") & "_backup.txt"
+        
+        ' Переименование текущего файла
+        Name m_LogFullFilePath As archiveFileName
+        
+        ' Создание нового файла
+        Dim fileNum As Integer
+        fileNum = FreeFile
+        
+        Open m_LogFullFilePath For Output As #fileNum
+            Print #fileNum, FormatLogMessage("Файл логов очищен", LogInfo)
+        Close #fileNum
+        
+        Log_Info "Файл логов очищен. Предыдущие логи сохранены в: " & archiveFileName
+    End If
+    
+    Exit Sub
+    
+ErrorHandler:
+    Debug.Print "Ошибка при очистке логов: " & Err.Number & " - " & Err.Description
+    Resume Next
+End Sub
+
+' Свойства
+Public Property Get IsLoggerInitialized() As Boolean
+    IsLoggerInitialized = m_IsLoggerInitialized
+End Property
+
+Public Property Get logFilePath() As String
+    logFilePath = m_LogFullFilePath
+End Property
+
+Public Property Let MaxFileSize(ByVal Value As Long)
+    If Value > 0 Then
+        m_LogMaximumFileSize = Value
+    End If
+End Property
+
+' Освобождение ресурсов
+Private Sub Class_Terminate()
+    On Error Resume Next
+    
+    ' Если логгер был инициализирован, записываем сообщение о завершении
+    If m_IsLoggerInitialized Then
+        If m_LogProviderImmediateIsEnable Then
+            Debug.Print FormatLogMessage("Логгер уничтожен", LogInfo)
+        End If
+        
+        If m_LogProviderTextIsEnable Then
+            Dim fileNum As Integer
+            fileNum = FreeFile
+            
+            Open m_LogFullFilePath For Append As #fileNum
+                Print #fileNum, FormatLogMessage("Логгер уничтожен", LogInfo)
+            Close #fileNum
+        End If
+    End If
+End Sub
+

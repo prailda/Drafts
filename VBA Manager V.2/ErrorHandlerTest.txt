@@ -1,0 +1,177 @@
+Attribute VB_Name = "ErrorHandlerTest"
+' Модуль ErrorHandlerTest
+' Проводит тестирование класса ErrorHandler
+Option Explicit
+
+' Результаты тестирования
+Private m_TestsTotal As Long
+Private m_TestsPassed As Long
+Private m_TestsFailed As Long
+
+' Ссылки на глобальные объекты
+Private m_Logger As Object
+Private m_ErrorHandler As Object
+Private m_TestReporter As TestReporter
+
+' Запуск тестов ErrorHandler
+Public Sub RunErrorHandlerTests()
+    On Error GoTo ErrorHandler
+    
+    ' Инициализация
+    Set m_Logger = GetLogger()
+    Set m_ErrorHandler = GetErrorHandler()
+    Set m_TestReporter = New TestReporter
+    
+    m_Logger.Log_Info "Запуск тестирования ErrorHandler", "ErrorHandlerTest"
+    m_TestReporter.StartReport
+    
+    ' Выполнение тестов
+    TestBasicErrorHandling
+    TestErrorHandlerConfiguration
+    TestSpecializedErrorHandlers
+    
+    ' Вывод результатов
+    m_TestReporter.FinishReport m_TestsPassed, m_TestsFailed, m_TestsTotal
+    
+    ' Отображение результатов
+    MsgBox "Тестирование ErrorHandler успешно завершено!" & vbCrLf & vbCrLf & _
+           "Отчет сохранен в: " & m_TestReporter.GetReportPath, vbInformation, "Тест"
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "Ошибка при тестировании ErrorHandler: " & Err.Number & " - " & Err.Description, vbCritical, "Ошибка"
+End Sub
+
+' Тестирование базовой обработки ошибок
+Private Sub TestBasicErrorHandling()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Базовая обработка ошибок"
+    
+    ' Создание экземпляра ErrorHandler
+    Dim errHandler As ErrorHandler
+    Set errHandler = New ErrorHandler
+    
+    ' Отключение отображения ошибок для тестов
+    errHandler.ShowErrors = False
+    
+    ' Проверка корректности объекта
+    TestCase "Создание экземпляра ErrorHandler", Not errHandler Is Nothing
+    
+    ' Проверка базовой обработки ошибок
+    Dim result As Boolean
+    result = errHandler.HandleError(1000, "Тестовая ошибка", "TestBasicErrorHandling", 0, False, "Тестирование обработки ошибок")
+    TestCase "HandleError возвращает успех", result = True
+    
+    ' Проверка свойств ErrorHandler
+    TestCase "Свойство ShowErrors по умолчанию", errHandler.ShowErrors = False ' Мы изменили значение
+    TestCase "Свойство LogErrors по умолчанию", errHandler.LogErrors = True
+    TestCase "Свойство DetailedErrorInfo по умолчанию", errHandler.DetailedErrorInfo = True
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestBasicErrorHandling", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тестирование настройки ErrorHandler
+Private Sub TestErrorHandlerConfiguration()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Настройка ErrorHandler"
+    
+    ' Создание экземпляра ErrorHandler
+    Dim errHandler As ErrorHandler
+    Set errHandler = New ErrorHandler
+    
+    ' Настройка ErrorHandler
+    errHandler.Configure False, False, False
+    
+    ' Проверка изменения свойств
+    TestCase "Свойство ShowErrors после Configure", errHandler.ShowErrors = False
+    TestCase "Свойство LogErrors после Configure", errHandler.LogErrors = False
+    TestCase "Свойство DetailedErrorInfo после Configure", errHandler.DetailedErrorInfo = False
+    
+    ' Изменение отдельных свойств
+    errHandler.ShowErrors = True
+    errHandler.LogErrors = True
+    errHandler.DetailedErrorInfo = True
+    
+    ' Проверка изменения отдельных свойств
+    TestCase "Свойство ShowErrors после изменения", errHandler.ShowErrors = True
+    TestCase "Свойство LogErrors после изменения", errHandler.LogErrors = True
+    TestCase "Свойство DetailedErrorInfo после изменения", errHandler.DetailedErrorInfo = True
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestErrorHandlerConfiguration", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тестирование специализированных обработчиков ошибок
+Private Sub TestSpecializedErrorHandlers()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Специализированные обработчики"
+    
+    ' Создание экземпляра ErrorHandler
+    Dim errHandler As ErrorHandler
+    Set errHandler = New ErrorHandler
+    
+    ' Отключение отображения ошибок для тестов
+    errHandler.ShowErrors = False
+    
+    ' Проверка специализированных обработчиков
+    Dim result As Integer
+    result = errHandler.HandleDuplicateNameError("TestObject", "Тестовый объект")
+    TestCase "HandleDuplicateNameError возвращает корректное значение", result = DuplicateAddSuffix
+    
+    result = errHandler.HandleInvalidNameError("Test@Object", "Тестовый объект")
+    TestCase "HandleInvalidNameError возвращает корректное значение", result = InvalidNameClean
+    
+    Dim fileResult As Boolean
+    fileResult = errHandler.HandleFileAccessError("C:\NonExistentFile.txt", "чтение")
+    TestCase "HandleFileAccessError возвращает корректное значение", fileResult = False
+    
+    ' Проверка IsVBAAccessEnabled
+    ' Это специальная функция, результат которой зависит от настроек безопасности
+    ' Мы только проверяем, что функция выполняется без ошибок
+    On Error Resume Next
+    Dim vbaAccess As Boolean
+    vbaAccess = errHandler.IsVBAAccessEnabled()
+    TestCase "IsVBAAccessEnabled выполняется без ошибок", Err.Number = 0
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestSpecializedErrorHandlers", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Метод тестового случая
+Private Sub TestCase(ByVal TestName As String, ByVal Condition As Boolean)
+    On Error Resume Next
+    
+    ' Проверяем условие
+    If Condition Then
+        m_Logger.Log_Debug "ТЕСТ ПРОЙДЕН: " & TestName, "TestCase"
+        m_TestReporter.ReportTestResult TestName, True
+    Else
+        m_Logger.Log_Error "ТЕСТ НЕ ПРОЙДЕН: " & TestName, "TestCase"
+        m_TestReporter.ReportTestResult TestName, False
+    End If
+End Sub
+

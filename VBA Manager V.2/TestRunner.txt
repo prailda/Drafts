@@ -1,0 +1,539 @@
+Attribute VB_Name = "TestRunner"
+' Модуль TestRunner
+' Обеспечивает централизованный запуск всех тестов приложения
+Option Explicit
+
+' Результаты тестирования
+Private m_TestsTotal As Long
+Private m_TestsPassed As Long
+Private m_TestsFailed As Long
+
+' Ссылки на глобальные объекты
+Private m_Logger As Object
+Private m_ErrorHandler As Object
+Private m_TestReporter As TestReporter
+
+' Главная процедура запуска тестов
+Public Sub RunAllTests()
+    On Error GoTo ErrorHandler
+    
+    ' Инициализация
+    Set m_Logger = GetLogger()
+    Set m_ErrorHandler = GetErrorHandler()
+    Set m_TestReporter = New TestReporter
+    
+    ' Инициализация и настройка системы
+    If Not InitializeSystem() Then
+        MsgBox "Не удалось инициализировать систему для тестирования!", vbCritical, "Ошибка"
+        Exit Sub
+    End If
+    
+    ' Сбросить счётчики тестов
+    ResetTestCounters
+    
+    ' Запуск процесса тестирования
+    m_Logger.Log_Info "Начало тестирования всех компонентов", "TestRunner"
+    m_TestReporter.StartReport
+    
+    ' Тестирование базовой инфраструктуры
+    TestInfrastructure
+    
+    ' Тестирование Logger
+    testLogger
+    
+    ' Тестирование ErrorHandler
+    TestErrorHandler
+    
+    ' Тестирование FileSystemManager
+    TestFileSystemManager
+    
+    ' Тестирование ValidationUtils
+    TestValidationUtils
+    
+    ' Тестирование ConfigManager
+    TestConfigManager
+    
+    ' Тестирование интеграции компонентов
+    TestComponentIntegration
+    
+    ' Вывод результатов
+    m_TestReporter.FinishReport m_TestsPassed, m_TestsFailed, m_TestsTotal
+    
+    ' Отображение результатов
+    ShowTestResults
+    
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "RunAllTests", Erl, False
+    Else
+        MsgBox "Ошибка при тестировании: " & Err.Number & " - " & Err.Description, vbCritical, "Ошибка"
+    End If
+    
+    ' Попытаемся завершить отчёт даже при ошибке
+    On Error Resume Next
+    m_TestReporter.FinishReport m_TestsPassed, m_TestsFailed, m_TestsTotal
+End Sub
+
+' Инициализация системы перед тестированием
+Private Function InitializeSystem() As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверка доступности системных компонентов
+    m_Logger.Log_Info "Инициализация системы для тестирования", "InitializeSystem"
+    
+    ' Настройка тестового окружения
+    Dim testLogPath As String
+    testLogPath = Environ("TEMP") & "\ExcellentVBA_Tests\Logs\TestLog_" & Format(Now(), "yyyymmdd_hhnnss") & ".log"
+    
+    ' Создание тестового каталога, если он не существует
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    
+    ' Создаем каталог для тестов
+    Dim testDir As String
+    testDir = Environ("TEMP") & "\ExcellentVBA_Tests\"
+    fsManager.CreateDirectoryRecursive testDir
+    
+    ' Настраиваем логгер для использования тестового каталога
+    Dim logger As logger
+    Set logger = GetLogger()
+    logger.Initialize testLogPath, True, True, LogDebug
+    
+    ' Передаём путь логгеру
+    m_TestReporter.SetLogPath testLogPath
+    
+    InitializeSystem = True
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "InitializeSystem", Erl, False
+    End If
+    InitializeSystem = False
+End Function
+
+' Тестирование базовой инфраструктуры
+Private Sub TestInfrastructure()
+    On Error GoTo ErrorHandler
+    
+    m_Logger.Log_Info "Запуск тестов базовой инфраструктуры", "TestInfrastructure"
+    m_TestReporter.StartTestGroup "Базовая инфраструктура"
+    
+    ' Тест доступности SupportModule
+    Dim configManager As configManager
+    Set configManager = GetConfigManager()
+    TestCase "Доступность ConfigManager через SupportModule", Not configManager Is Nothing
+    
+    Dim errHandler As ErrorHandler
+    Set errHandler = GetErrorHandler()
+    TestCase "Доступность ErrorHandler через SupportModule", Not errHandler Is Nothing
+    
+    Dim fileSystemMgr As FileSystemManager
+    Set fileSystemMgr = GetFileSystemManager()
+    TestCase "Доступность FileSystemManager через SupportModule", Not fileSystemMgr Is Nothing
+    
+    ' Тест FileUtils
+    TestCase "Функционирование FileUtils.FileExists", IsObject(fileSystemMgr)
+    
+    ' Тестирование StringUtils
+    TestCase "Функционирование StringUtils.IsLetter", StringUtils.IsLetter("A") = True
+    TestCase "Функционирование StringUtils.IsDigit", StringUtils.IsDigit("5") = True
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestInfrastructure", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тестирование Logger
+Private Sub testLogger()
+    On Error GoTo ErrorHandler
+    
+    m_Logger.Log_Info "Запуск тестов логгера", "TestLogger"
+    m_TestReporter.StartTestGroup "Logger"
+    
+    ' Тест инициализации
+    Dim testLogger As logger
+    Set testLogger = New logger
+    
+    ' Путь для тестового лог-файла
+    Dim logFilePath As String
+    logFilePath = Environ("TEMP") & "\ExcellentVBA_Tests\Logs\TestLogger_" & Format(Now(), "yyyymmdd_hhnnss") & ".log"
+    
+    ' Инициализация логгера
+    Dim initResult As Boolean
+    initResult = testLogger.Initialize(logFilePath, True, True, LogDebug)
+    TestCase "Инициализация логгера", initResult = True
+    TestCase "Флаг инициализации установлен", testLogger.IsLoggerInitialized = True
+    TestCase "Путь к файлу лога правильный", testLogger.logFilePath = logFilePath
+    
+    Call RunLoggerTests
+    
+    ' Тест методов логирования
+    testLogger.Log_Debug "Тестовое сообщение DEBUG", "TestLogger"
+    testLogger.Log_Info "Тестовое сообщение INFO", "TestLogger"
+    testLogger.Log_Warning "Тестовое сообщение WARNING", "TestLogger"
+    testLogger.Log_Error "Тестовое сообщение ERROR", "TestLogger"
+    testLogger.Log_Success "Тестовое сообщение SUCCESS", "TestLogger"
+    
+    ' Тест существования лог-файла
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    TestCase "Создан файл лога", fsManager.FileExists(logFilePath) = True
+    
+    ' Тест чтения лог-файла
+    Dim logContent As String
+    logContent = fsManager.ReadTextFile(logFilePath)
+    TestCase "Файл лога содержит текст", Len(logContent) > 0
+    TestCase "Файл лога содержит тестовые сообщения", InStr(logContent, "Тестовое сообщение") > 0
+    
+    ' Тест настроек уровня логирования
+    testLogger.SetLogLevel LogWarning
+    testLogger.Log_Debug "Это сообщение не должно быть записано", "TestLogger"
+    testLogger.Log_Warning "Это сообщение должно быть записано", "TestLogger"
+    
+    ' Перечитываем лог-файл
+    logContent = fsManager.ReadTextFile(logFilePath)
+    TestCase "Фильтрация по уровню логирования работает", InStr(logContent, "не должно быть записано") = 0
+    TestCase "Сообщения нужного уровня записываются", InStr(logContent, "должно быть записано") > 0
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestLogger", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тестирование ErrorHandler
+Private Sub TestErrorHandler()
+    On Error GoTo ErrorHandler
+    
+    m_Logger.Log_Info "Запуск тестов обработчика ошибок", "TestErrorHandler"
+    m_TestReporter.StartTestGroup "ErrorHandler"
+    
+    ' Создание экземпляра ErrorHandler
+    Dim errHandler As ErrorHandler
+    Set errHandler = New ErrorHandler
+    
+    ' Настройка ErrorHandler
+    errHandler.Configure True, True, True
+    
+    ' Проверка свойств
+    TestCase "Свойство ShowErrors установлено", errHandler.ShowErrors = True
+    TestCase "Свойство LogErrors установлено", errHandler.LogErrors = True
+    TestCase "Свойство DetailedErrorInfo установлено", errHandler.DetailedErrorInfo = True
+    
+    ' Измененяем и проверяем
+    errHandler.ShowErrors = False
+    TestCase "Свойство ShowErrors изменено", errHandler.ShowErrors = False
+    
+    Call RunErrorHandlerTests
+    
+    ' Тестирование обработки ошибок без показа пользователю
+    Dim result As Boolean
+    result = errHandler.HandleError(1000, "Тестовая ошибка", "TestErrorHandler", 0, False, "Дополнительная информация")
+    TestCase "HandleError возвращает успех", result = True
+    
+    ' Проверка IsVBAAccessEnabled (не показываем UI так как это тест)
+    errHandler.ShowErrors = False
+    TestCase "IsVBAAccessEnabled доступно", IsObject(errHandler) = True
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestErrorHandler", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тестирование FileSystemManager
+Private Sub TestFileSystemManager()
+    On Error GoTo ErrorHandler
+    
+    m_Logger.Log_Info "Запуск тестов файлового менеджера", "TestFileSystemManager"
+    m_TestReporter.StartTestGroup "FileSystemManager"
+    
+    ' Создание FileSystemManager
+    Dim fsManager As FileSystemManager
+    Set fsManager = New FileSystemManager
+    
+    ' Тестовые пути
+    Dim testDirPath As String
+    testDirPath = Environ("TEMP") & "\ExcellentVBA_Tests\FSManager\"
+    
+    Dim testFilePath As String
+    testFilePath = testDirPath & "test_file.txt"
+    
+    Dim testFileContent As String
+    testFileContent = "Это тестовое содержимое файла для проверки FileSystemManager."
+    
+    ' Очистка среды перед тестом
+    On Error Resume Next
+    If fsManager.FileExists(testFilePath) Then
+        fsManager.DeleteFile testFilePath
+    End If
+    On Error GoTo ErrorHandler
+    
+    ' Проверка существования директории
+    TestCase "DirectoryExists для несуществующей директории", fsManager.DirectoryExists(testDirPath & "non_existent/") = False
+    
+    ' Создание директории
+    TestCase "CreateDirectory", fsManager.CreateDirectoryRecursive(testDirPath) = True
+    TestCase "DirectoryExists после создания", fsManager.DirectoryExists(testDirPath) = True
+    
+    ' Создание вложенной директории
+    Dim nestedDirPath As String
+    nestedDirPath = testDirPath & "nested1\nested2\nested3\"
+    TestCase "CreateDirectoryRecursive для вложенных каталогов", fsManager.CreateDirectoryRecursive(nestedDirPath) = True
+    TestCase "DirectoryExists для вложенного каталога", fsManager.DirectoryExists(nestedDirPath) = True
+    
+    ' Работа с файлами
+    TestCase "FileExists для несуществующего файла", fsManager.FileExists(testFilePath) = False
+    
+    ' Запись и чтение файла
+    TestCase "WriteTextFile", fsManager.WriteTextFile(testFilePath, testFileContent, False) = True
+    TestCase "FileExists после создания", fsManager.FileExists(testFilePath) = True
+    
+    Dim readContent As String
+    readContent = fsManager.ReadTextFile(testFilePath)
+    TestCase "ReadTextFile содержимое совпадает", readContent = testFileContent
+    
+    ' Копирование файла
+    Dim copyFilePath As String
+    copyFilePath = testDirPath & "test_file_copy.txt"
+    TestCase "CopyFile", fsManager.CopyFile(testFilePath, copyFilePath, True) = True
+    TestCase "FileExists для скопированного файла", fsManager.FileExists(copyFilePath) = True
+    
+    ' Удаление файла
+    TestCase "DeleteFile", fsManager.DeleteFile(copyFilePath) = True
+    TestCase "FileExists после удаления", fsManager.FileExists(copyFilePath) = False
+    
+    ' Работа с путями
+    TestCase "GetFileName", fsManager.GetFileName(testFilePath) = "test_file.txt"
+    TestCase "GetDirectoryPath", fsManager.GetDirectoryPath(testFilePath) = testDirPath
+    
+    ' Очистка после теста
+    fsManager.DeleteFile testFilePath
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestFileSystemManager", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тестирование ValidationUtils
+Private Sub TestValidationUtils()
+    On Error GoTo ErrorHandler
+    
+    m_Logger.Log_Info "Запуск тестов ValidationUtils", "TestValidationUtils"
+    m_TestReporter.StartTestGroup "ValidationUtils"
+    
+    ' Тестирование вспомогательных функций
+    TestCase "IsLetter с буквой", StringUtils.IsLetter("A") = True
+    TestCase "IsLetter с цифрой", StringUtils.IsLetter("5") = False
+    TestCase "IsDigit с цифрой", StringUtils.IsDigit("7") = True
+    TestCase "IsDigit с буквой", StringUtils.IsDigit("A") = False
+    TestCase "IsVBAReservedWord с зарезервированным словом", StringUtils.IsVBAReservedWord("Class") = True
+    TestCase "IsVBAReservedWord с обычным словом", StringUtils.IsVBAReservedWord("MyClass") = False
+    
+    ' Тестирование функций валидации имён VBA-компонентов
+    TestCase "CleanVBAName с корректным именем", StringUtils.CleanVBAName("Module1") = "Module1"
+    TestCase "CleanVBAName с пробелом", StringUtils.CleanVBAName("My Module") = "My_Module"
+    TestCase "CleanVBAName с началом не с буквы", StringUtils.CleanVBAName("1Module") = "m_1Module"
+    TestCase "CleanVBAName со спец. символами", StringUtils.CleanVBAName("Module@#$%") = "Module____"
+    
+    ' Тестирование функций валидации путей
+    TestCase "FormatPath с корректным путём", StringUtils.FormatPath("C:\Temp\file.txt") = "C:\Temp\file.txt"
+    TestCase "FormatPath с прямыми слешами", StringUtils.FormatPath("C:/Temp/file.txt") = "C:\Temp\file.txt"
+    TestCase "FormatPath с двойными слешами", StringUtils.FormatPath("C:\\Temp\\file.txt") = "C:\Temp\file.txt"
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestValidationUtils", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тестирование ConfigManager
+Private Sub TestConfigManager()
+    On Error GoTo ErrorHandler
+    
+    m_Logger.Log_Info "Запуск тестов ConfigManager", "TestConfigManager"
+    m_TestReporter.StartTestGroup "ConfigManager"
+    
+    ' Получение ConfigManager
+    Dim cfgManager As configManager
+    Set cfgManager = New configManager
+    
+    ' Тестовый путь к конфигурации
+    Dim testConfigPath As String
+    testConfigPath = Environ("TEMP") & "\ExcellentVBA_Tests\Config\test_config.ini"
+    
+    ' Очистка среды перед тестом
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    
+    On Error Resume Next
+    If fsManager.FileExists(testConfigPath) Then
+        fsManager.DeleteFile testConfigPath
+    End If
+    On Error GoTo ErrorHandler
+    
+    Call RunConfigManagerTests
+    
+    ' Проверка создания и загрузки конфигурации
+    TestCase "LoadConfig создание нового файла", cfgManager.LoadConfig(testConfigPath) = True
+    TestCase "IsConfigLoaded после загрузки", cfgManager.IsConfigLoaded = True
+    TestCase "ConfigFilePath правильный", cfgManager.ConfigFilePath = testConfigPath
+    TestCase "Файл конфигурации создан", fsManager.FileExists(testConfigPath) = True
+    
+    ' Проверка операций с конфигурацией
+    TestCase "SetConfigValue", cfgManager.SetConfigValue("TestSection", "TestKey", "TestValue") = True
+    TestCase "GetConfigValue", cfgManager.GetConfigValue("TestSection", "TestKey", "") = "TestValue"
+    
+    ' Проверка сохранения конфигурации
+    TestCase "SaveConfig после изменений", cfgManager.SaveConfig() = True
+    
+    ' Создаем новый экземпляр для проверки загрузки
+    Dim cfgManager2 As configManager
+    Set cfgManager2 = New configManager
+    
+    TestCase "LoadConfig существующего файла", cfgManager2.LoadConfig(testConfigPath) = True
+    TestCase "Значение сохранено и загружено", cfgManager2.GetConfigValue("TestSection", "TestKey", "") = "TestValue"
+    
+    ' Проверка типизированного доступа
+    cfgManager.SetConfigValue "TestSection", "TestBool", "True"
+    cfgManager.SetConfigValue "TestSection", "TestNumber", "123.45"
+    
+    TestCase "GetConfigValueBool", cfgManager.GetConfigValueBool("TestSection", "TestBool", False) = True
+    TestCase "GetConfigValueNumber", Abs(cfgManager.GetConfigValueNumber("TestSection", "TestNumber", 0) - 123.45) < 0.001
+    
+    ' Проверка работы с секциями
+    TestCase "SectionExists существующая", cfgManager.SectionExists("TestSection") = True
+    TestCase "SectionExists несуществующая", cfgManager.SectionExists("NonExistentSection") = False
+    
+    ' Удаление секции
+    TestCase "RemoveSection", cfgManager.RemoveSection("TestSection") = True
+    TestCase "SectionExists после удаления", cfgManager.SectionExists("TestSection") = False
+    
+    ' Очистка после теста
+    fsManager.DeleteFile testConfigPath
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestConfigManager", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тестирование интеграции компонентов
+Private Sub TestComponentIntegration()
+    On Error GoTo ErrorHandler
+    
+    m_Logger.Log_Info "Запуск тестов интеграции компонентов", "TestComponentIntegration"
+    m_TestReporter.StartTestGroup "Интеграция компонентов"
+    
+    ' Тест взаимодействия Logger и ErrorHandler
+    TestCase "Logger доступен для ErrorHandler", IsObject(GetLogger()) = True
+    TestCase "ErrorHandler доступен для Logger", IsObject(GetErrorHandler()) = True
+    
+    ' Тест ErrorHandler с логгированием ошибок
+    Dim errHandler As ErrorHandler
+    Set errHandler = GetErrorHandler()
+    errHandler.LogErrors = True
+    TestCase "Обработка ошибки с логгированием", errHandler.HandleError(12345, "Тестовая интеграционная ошибка", "TestIntegration", 1, False) = True
+    
+    ' Тест взаимодействия ConfigManager и FileSystemManager
+    Dim configPath As String
+    configPath = Environ("TEMP") & "\ExcellentVBA_Tests\Config\integration_test.ini"
+    
+    Dim cfgManager As configManager
+    Set cfgManager = GetConfigManager()
+    
+    cfgManager.ConfigFilePath = configPath
+    TestCase "ConfigManager использует FileSystemManager", cfgManager.LoadConfig() = True
+    
+    ' Тест проверки существования файла конфигурации
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    TestCase "Файл конфигурации создан через ConfigManager", fsManager.FileExists(configPath) = True
+    
+    ' Очистка после теста
+    fsManager.DeleteFile configPath
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestComponentIntegration", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Метод тестового случая
+Private Sub TestCase(ByVal TestName As String, ByVal Condition As Boolean)
+    On Error Resume Next
+    
+    ' Увеличиваем счётчик тестов
+    m_TestsTotal = m_TestsTotal + 1
+    
+    ' Проверяем условие
+    If Condition Then
+        m_TestsPassed = m_TestsPassed + 1
+        m_Logger.Log_Debug "ТЕСТ ПРОЙДЕН: " & TestName, "TestCase"
+        m_TestReporter.ReportTestResult TestName, True
+    Else
+        m_TestsFailed = m_TestsFailed + 1
+        m_Logger.Log_Error "ТЕСТ НЕ ПРОЙДЕН: " & TestName, "TestCase"
+        m_TestReporter.ReportTestResult TestName, False
+    End If
+End Sub
+
+' Сброс счётчиков тестов
+Private Sub ResetTestCounters()
+    m_TestsTotal = 0
+    m_TestsPassed = 0
+    m_TestsFailed = 0
+End Sub
+
+' Отображение результатов тестирования
+Public Sub ShowTestResults()
+    Dim Message As String
+    Message = "Результаты тестирования:" & vbCrLf & vbCrLf & _
+              "Всего тестов: " & m_TestsTotal & vbCrLf & _
+              "Успешных: " & m_TestsPassed & vbCrLf & _
+              "Неудачных: " & m_TestsFailed & vbCrLf & vbCrLf
+              
+    If m_TestsFailed = 0 Then
+        Message = Message & "Все тесты пройдены успешно!" & vbCrLf & vbCrLf & _
+                  "Детальный отчет сохранен в: " & m_TestReporter.GetReportPath
+        MsgBox Message, vbInformation, "Тестирование завершено"
+    Else
+        Message = Message & "ВНИМАНИЕ! Некоторые тесты не пройдены!" & vbCrLf & vbCrLf & _
+                  "Детальный отчет сохранен в: " & m_TestReporter.GetReportPath
+        MsgBox Message, vbExclamation, "Тестирование завершено с ошибками"
+    End If
+End Sub
+

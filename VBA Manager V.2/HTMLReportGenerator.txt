@@ -1,0 +1,251 @@
+Attribute VB_Name = "HTMLReportGenerator"
+' Модуль HTMLReportGenerator - с гарантией корректной кодировки
+Option Explicit
+
+' Части HTML отчета
+Private m_HTMLHeader As String
+Private m_HTMLStyle As String
+Private m_HTMLContent As String
+Private m_HTMLFooter As String
+
+' ' Инициализация базового шаблона
+Public Sub InitializeHTMLReport(ByVal Title As String)
+    ' Заголовок HTML с явным указанием кодировки UTF-8
+    m_HTMLHeader = "<!DOCTYPE html>" & vbCrLf & _
+                  "<html><head>" & vbCrLf & _
+                  "<meta http-equiv=""Content-Type"" content=""text/html; charset=UTF-8"">" & vbCrLf & _
+                  "<meta charset=""UTF-8"">" & vbCrLf & _
+                  "<title>" & Title & "</title>" & vbCrLf
+    
+    ' Добавляем стили
+    InitializeStyles
+    
+    ' Начало содержимого
+    m_HTMLContent = "<body>" & vbCrLf & _
+                   "<h1>" & Title & "</h1>" & vbCrLf & _
+                   "<p class=""timestamp"">Время создания: " & Format(Now, "dd.mm.yyyy hh:mm:ss") & "</p>" & vbCrLf
+    
+    ' Футер
+    m_HTMLFooter = "</body></html>"
+End Sub
+
+Public Function SaveHTMLReport(ByVal FilePath As String) As Boolean
+    On Error Resume Next
+    
+    ' Временный файл TXT
+    Dim TempTxtPath As String
+    TempTxtPath = FilePath & ".tmp"
+
+    ' Сначала сохраняем HTML как TXT (ANSI)
+    If Not SaveHTMLAsTxt(TempTxtPath, GetHTMLReport()) Then
+        Debug.Print "Ошибка при сохранении TXT"
+        SaveHTMLReport = False
+        Exit Function
+    End If
+
+    ' Теперь пересохраняем TXT в HTML в UTF-8
+    If Not ConvertTxtToUTF8Html(TempTxtPath, FilePath) Then
+        Debug.Print "Ошибка при конвертации в UTF-8"
+        SaveHTMLReport = False
+        Exit Function
+    End If
+
+    ' Удаляем временный файл TXT
+    Kill TempTxtPath
+
+    Debug.Print "Файл HTML сохранён в UTF-8: " & FilePath
+    SaveHTMLReport = True
+End Function
+
+Private Function SaveHTMLAsTxt(ByVal FilePath As String, ByVal htmlContent As String) As Boolean
+    On Error Resume Next
+
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    Dim fileStream As Object
+    Set fileStream = fso.CreateTextFile(FilePath, True, False) ' False = ANSI
+    fileStream.Write htmlContent
+    fileStream.Close
+
+    Set fileStream = Nothing
+    Set fso = Nothing
+
+    SaveHTMLAsTxt = (Err.Number = 0)
+End Function
+
+Private Function ConvertTxtToUTF8Html(ByVal TxtPath As String, ByVal HtmlPath As String) As Boolean
+    On Error Resume Next
+
+    Dim stream As Object
+    Set stream = CreateObject("ADODB.Stream")
+
+    ' Открываем TXT-файл (в ANSI)
+    stream.Type = 2 ' adTypeText
+    stream.Charset = "_autodetect" ' Автоматическое определение кодировки
+    stream.Open
+    stream.LoadFromFile TxtPath
+
+    ' Меняем кодировку на UTF-8
+    stream.Position = 0
+    stream.Charset = "UTF-8"
+
+    ' Сохраняем в HTML-файл
+    stream.SaveToFile HtmlPath, 2 ' adSaveCreateOverWrite
+    stream.Close
+    Set stream = Nothing
+
+    ConvertTxtToUTF8Html = (Err.Number = 0)
+End Function
+
+
+Private Function SaveHTMLUsingFSO(ByVal FilePath As String, ByVal htmlContent As String) As Boolean
+    On Error Resume Next
+
+    ' Создаём объект FileSystemObject
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    ' Открываем файл для записи
+    Dim fileStream As Object
+    Set fileStream = fso.CreateTextFile(FilePath, True, True) ' Последний аргумент True - UTF-8!
+
+    ' Записываем HTML-контент
+    fileStream.Write htmlContent
+    fileStream.Close
+
+    ' Освобождаем ресурсы
+    Set fileStream = Nothing
+    Set fso = Nothing
+
+    ' Проверяем ошибки
+    SaveHTMLUsingFSO = (Err.Number = 0)
+    If Not SaveHTMLUsingFSO Then
+        Debug.Print "Ошибка при сохранении через FSO: " & Err.Number & " - " & Err.Description
+    End If
+End Function
+
+' Остальные методы остаются неизменными...
+'
+'' Сохранение отчета в файл с использованием двоичной записи для UTF-8 с BOM
+'' Сохранение отчета в файл с использованием двоичной записи для UTF-8 с BOM
+'Public Function SaveHTMLReport(ByVal FilePath As String) As Boolean
+'    On Error GoTo ErrorHandler
+'
+'    ' Используем бинарную запись
+'    Dim fileNum As Integer
+'    fileNum = FreeFile
+'
+'    ' Открываем файл для бинарной записи
+'    Open FilePath For Binary As #fileNum
+'
+'    ' Преобразуем HTML в UTF-8 с BOM
+'    Dim htmlBytes() As Byte
+'    htmlBytes = ConvertStringToUTF8(GetHTMLReport())
+'
+'    ' Записываем байты HTML
+'    Put #fileNum, , htmlBytes
+'
+'    ' Закрываем файл
+'    Close #fileNum
+'
+'    ' Логирование успешного сохранения
+'    Dim logger As Object
+'    Set logger = GetLogger()
+'    If Not logger Is Nothing Then
+'        If logger.IsLoggerInitialized Then
+'            logger.Log_Info "HTML отчет успешно сохранен в UTF-8: " & FilePath, "HTMLReportGenerator"
+'        End If
+'    End If
+'
+'    SaveHTMLReport = True
+'    Exit Function
+'
+'ErrorHandler:
+'    Debug.Print "Ошибка при сохранении HTML: " & Err.Number & " - " & Err.Description
+'
+'    ' Закрываем файл если он был открыт
+'    On Error Resume Next
+'    Close #fileNum
+'
+'    ' Пробуем альтернативный метод сохранения
+'    SaveHTMLUsingScripting FilePath, GetHTMLReport()
+'
+'    SaveHTMLReport = False
+'End Function
+
+'  Конвертация строки в массив байтов UTF-8
+Private Function ConvertStringToUTF8(ByVal text As String) As Byte()
+    On Error Resume Next
+    
+    Dim stream As Object
+    Set stream = CreateObject("ADODB.Stream")
+    
+    ' Установка типа и кодировки
+    stream.Type = 2 ' adTypeText
+    stream.Charset = "UTF-8" ' Исправлено на UTF-8
+    
+    ' Записываем текст
+    stream.Open
+    stream.WriteText text
+    
+    ' Конвертируем в бинарный тип
+    stream.Position = 0
+    stream.Type = 1 ' adTypeBinary
+    
+    ' Считываем весь поток (включая BOM)
+    ConvertStringToUTF8 = stream.Read()
+    
+    ' Закрываем поток
+    stream.Close
+    Set stream = Nothing
+End Function
+
+' Альтернативный метод сохранения через FileSystemObject
+Private Function SaveHTMLUsingScripting(ByVal FilePath As String, ByVal htmlContent As String) As Boolean
+    On Error Resume Next
+
+    Dim stream As Object
+    Set stream = CreateObject("ADODB.Stream")
+
+    ' Устанавливаем режим текстового потока
+    stream.Type = 2 ' adTypeText
+    stream.Charset = "UTF-8" ' Устанавливаем кодировку UTF-8
+    stream.Open
+
+    ' Добавляем BOM (Byte Order Mark) - это точно укажет Windows, что файл в UTF-8
+    stream.WriteText ChrW(&HFEFF) & htmlContent
+    
+    ' Сохраняем в файл
+    stream.SaveToFile FilePath, 2 ' adSaveCreateOverWrite
+    stream.Close
+    Set stream = Nothing
+
+    SaveHTMLUsingScripting = (Err.Number = 0)
+    
+    ' Проверяем результат и логируем
+    If SaveHTMLUsingScripting Then
+        Debug.Print "Файл сохранен корректно в UTF-8: " & FilePath
+    Else
+        Debug.Print "Ошибка при сохранении через ADODB.Stream: " & Err.Number & " - " & Err.Description
+    End If
+End Function
+
+
+
+' Очистка имени для использования в качестве ID в HTML
+Private Function CleanIdName(ByVal Name As String) As String
+    Dim result As String
+    result = Name
+    
+    ' Замена недопустимых символов
+    Dim i As Integer
+    For i = 1 To Len(result)
+        If Not (Mid(result, i, 1) Like "[A-Za-z0-9\-_]") Then
+            Mid(result, i, 1) = "-"
+        End If
+    Next i
+    
+    CleanIdName = result
+End Function
+

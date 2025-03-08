@@ -1,0 +1,198 @@
+Attribute VB_Name = "SupportModule"
+' Модуль SupportModule
+' Обеспечивает доступ к глобальным экземплярам классов (реализация Singleton)
+
+Option Explicit
+
+' Глобальные экземпляры классов
+Private g_ConfigManager As configManager
+Private g_Logger As logger
+Private g_ErrorHandler As ErrorHandler
+Private g_FileSystemManager As FileSystemManager
+Private g_UIManager As UIManager
+
+' Флаги инициализации системы
+Private g_IsConfigManagerInitialized As Boolean
+Private g_IsLoggerInitialized As Boolean
+Private g_IsErrorHandlerInitialized As Boolean
+
+' Функция для получения единственного экземпляра Logger
+Public Function GetLogger() As logger
+    If g_Logger Is Nothing Then
+        Set g_Logger = New logger
+    End If
+    Set GetLogger = g_Logger
+End Function
+
+' Функция для получения единственного экземпляра ErrorHandler
+Public Function GetErrorHandler() As ErrorHandler
+    If g_ErrorHandler Is Nothing Then
+        Set g_ErrorHandler = New ErrorHandler
+    End If
+    Set GetErrorHandler = g_ErrorHandler
+End Function
+
+' Функция для получения единственного экземпляра ConfigManager
+Public Function GetConfigManager() As configManager
+    If g_ConfigManager Is Nothing Then
+        Set g_ConfigManager = New configManager
+    End If
+    Set GetConfigManager = g_ConfigManager
+End Function
+
+' Функция для получения единственного экземпляра FileSystemManager
+Public Function GetFileSystemManager() As FileSystemManager
+    If g_FileSystemManager Is Nothing Then
+        Set g_FileSystemManager = New FileSystemManager
+    End If
+    Set GetFileSystemManager = g_FileSystemManager
+End Function
+
+' Функция для получения единственного экземпляра UIManager
+Public Function GetUIManager() As UIManager
+    If g_UIManager Is Nothing Then
+        Set g_UIManager = New UIManager
+    End If
+    Set GetUIManager = g_UIManager
+End Function
+
+' Инициализация всей системы
+Public Function InitializeSystem(Optional ByVal ConfigFilePath As String = "") As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Инициализация в правильном порядке
+    ' 1. Сначала FileSystemManager (не зависит от других)
+    Dim fsm As FileSystemManager
+    Set fsm = GetFileSystemManager()
+    
+    ' 2. Затем ConfigManager (зависит от FileSystemManager)
+    Dim cfgMgr As configManager
+    Set cfgMgr = GetConfigManager()
+    If Not g_IsConfigManagerInitialized Then
+        If Len(ConfigFilePath) = 0 Then
+            ConfigFilePath = GetDefaultConfigPath()
+        End If
+        If Not cfgMgr.LoadConfig(ConfigFilePath) Then
+            Debug.Print "Ошибка при загрузке конфигурации"
+        Else
+            g_IsConfigManagerInitialized = True
+        End If
+    End If
+    
+    ' 3. Затем Logger (зависит от ConfigManager и FileSystemManager)
+    Dim logger As logger
+    Set logger = GetLogger()
+    If Not g_IsLoggerInitialized Then
+        ' Загрузка параметров логирования из конфигурации
+        Dim logPath As String
+        Dim LogLevel As Long
+        Dim enableTextLog As Boolean
+        Dim enableImmediateLog As Boolean
+        
+        If g_IsConfigManagerInitialized Then
+            logPath = cfgMgr.GetConfigValue("Logging", "LogTextFilePath", "C:\Logs\") & "ExcellentLogs.txt"
+            LogLevel = StringToLogLevel(cfgMgr.GetConfigValue("Logging", "LogLevel", "Debug"))
+            enableTextLog = cfgMgr.GetConfigValueBool("Logging", "LogProviderTextEnabled", True)
+            enableImmediateLog = cfgMgr.GetConfigValueBool("Logging", "LogProviderImmediateEnabled", True)
+        Else
+            ' Параметры по умолчанию, если конфигурация недоступна
+            logPath = "C:\Logs\ExcellentLogs.txt"
+            LogLevel = 0 ' LogDebug
+            enableTextLog = True
+            enableImmediateLog = True
+        End If
+        
+        ' Инициализация логгера
+        If Not logger.Initialize(logPath, enableTextLog, enableImmediateLog, LogLevel) Then
+            Debug.Print "Ошибка при инициализации логгера"
+        Else
+            g_IsLoggerInitialized = True
+            logger.Log_Info "Система инициализирована", "SupportModule"
+        End If
+    End If
+    
+    ' 4. Затем ErrorHandler (зависит от Logger)
+    Dim errHandler As ErrorHandler
+    Set errHandler = GetErrorHandler()
+    If Not g_IsErrorHandlerInitialized Then
+        ' Загрузка параметров из конфигурации
+        Dim ShowErrors As Boolean
+        Dim LogErrors As Boolean
+        Dim DetailedErrorInfo As Boolean
+        
+        If g_IsConfigManagerInitialized Then
+            ShowErrors = cfgMgr.GetConfigValueBool("Errors", "ShowErrors", True)
+            LogErrors = cfgMgr.GetConfigValueBool("Errors", "LogErrors", True)
+            DetailedErrorInfo = cfgMgr.GetConfigValueBool("Errors", "DetailedErrorInfo", True)
+        Else
+            ' Параметры по умолчанию, если конфигурация недоступна
+            ShowErrors = True
+            LogErrors = True
+            DetailedErrorInfo = True
+        End If
+        
+        ' Настройка ErrorHandler
+        errHandler.Configure ShowErrors, LogErrors, DetailedErrorInfo
+        g_IsErrorHandlerInitialized = True
+    End If
+
+    ' Инициализация успешно завершена
+    InitializeSystem = True
+    If g_IsLoggerInitialized Then
+        logger.Log_Success "Система успешно инициализирована", "SupportModule"
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    Debug.Print "Ошибка при инициализации системы: " & Err.Number & " - " & Err.Description
+    InitializeSystem = False
+    Resume Next
+End Function
+
+' Функция для получения пути к конфигурационному файлу по умолчанию
+Private Function GetDefaultConfigPath() As String
+    ' Попытка получить AppData для текущего пользователя
+    Dim appDataPath As String
+    appDataPath = Environ("APPDATA")
+    
+    If Len(appDataPath) = 0 Then
+        appDataPath = "C:\"
+    End If
+    
+    GetDefaultConfigPath = appDataPath & "\ExcellentVBA\Config\ExcellentVBA.ini"
+End Function
+
+' Преобразование строкового представления уровня логирования в числовой формат
+Private Function StringToLogLevel(ByVal LevelStr As String) As Long
+    Select Case LCase(LevelStr)
+        Case "debug":   StringToLogLevel = 0  ' LogDebug
+        Case "info":    StringToLogLevel = 1  ' LogInfo
+        Case "warning": StringToLogLevel = 2  ' LogWarning
+        Case "error":   StringToLogLevel = 3  ' LogError
+        Case "success": StringToLogLevel = 4  ' LogSuccess
+        Case Else:      StringToLogLevel = 0  ' LogDebug по умолчанию
+    End Select
+End Function
+
+' Освобождение ресурсов при выходе
+Public Sub TerminateSystem()
+    On Error Resume Next
+    
+    ' Логирование завершения, если логгер инициализирован
+    If Not g_Logger Is Nothing And g_IsLoggerInitialized Then
+        g_Logger.Log_Info "Завершение работы системы", "SupportModule"
+    End If
+    
+    ' Освобождение экземпляров
+    Set g_Logger = Nothing
+    Set g_ErrorHandler = Nothing
+    Set g_ConfigManager = Nothing
+    Set g_FileSystemManager = Nothing
+    Set g_UIManager = Nothing
+    
+    ' Сброс флагов
+    g_IsConfigManagerInitialized = False
+    g_IsLoggerInitialized = False
+    g_IsErrorHandlerInitialized = False
+End Sub

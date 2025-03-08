@@ -1,0 +1,274 @@
+Attribute VB_Name = "LoggerTest"
+' Модуль LoggerTest
+' Проводит тестирование класса Logger
+Option Explicit
+
+' Результаты тестирования
+Private m_TestsTotal As Long
+Private m_TestsPassed As Long
+Private m_TestsFailed As Long
+
+' Ссылки на глобальные объекты
+Private m_Logger As Object
+Private m_ErrorHandler As Object
+Private m_TestReporter As TestReporter
+
+' Запуск тестов Logger
+Public Sub RunLoggerTests()
+    On Error GoTo ErrorHandler
+    
+    ' Инициализация
+    Set m_Logger = GetLogger()
+    Set m_ErrorHandler = GetErrorHandler()
+    Set m_TestReporter = New TestReporter
+    
+    ' Запуск процесса тестирования
+    m_Logger.Log_Info "Начало тестирования Logger", "LoggerTest"
+    m_TestReporter.StartReport
+    
+    ' Выполнение тестов
+    TestLoggerInitialization
+    TestLoggingLevels
+    TestProviderConfiguration
+    TestLogRotation
+    
+    ' Вывод результатов
+    m_TestReporter.FinishReport m_TestsPassed, m_TestsFailed, m_TestsTotal
+    
+    ' Отображение результатов
+    ShowTestResults
+    
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "RunLoggerTests", Erl, False
+    Else
+        MsgBox "Ошибка при тестировании Logger: " & Err.Number & " - " & Err.Description, vbCritical, "Ошибка"
+    End If
+End Sub
+
+' Тест инициализации Logger
+Private Sub TestLoggerInitialization()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Инициализация Logger"
+    
+    ' Создание тестового логгера
+    Dim testLogger As logger
+    Set testLogger = New logger
+    
+    ' Проверка начальных значений
+    TestCase "Инициализация объекта Logger", Not testLogger Is Nothing
+    TestCase "Флаг инициализации по умолчанию", testLogger.IsLoggerInitialized = False
+    
+    ' Путь к тестовому лог-файлу
+    Dim logPath As String
+    logPath = Environ("TEMP") & "\ExcellentVBA_Tests\Logs\logger_init_test.log"
+    
+    ' Инициализация с явными параметрами
+    Dim initResult As Boolean
+    initResult = testLogger.Initialize(logPath, True, True, LogDebug)
+    TestCase "Метод Initialize возвращает успех", initResult = True
+    TestCase "Флаг инициализации после Initialize", testLogger.IsLoggerInitialized = True
+    TestCase "Путь к файлу лога корректный", testLogger.logFilePath = logPath
+    
+    ' Проверка записи в лог
+    testLogger.Log_Info "Тест инициализации Logger", "TestLoggerInitialization"
+    
+    ' Проверка существования файла лога
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    TestCase "Файл лога создан", fsManager.FileExists(logPath) = True
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestLoggerInitialization", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тест уровней логирования
+Private Sub TestLoggingLevels()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Уровни логирования"
+    
+    ' Создание тестового логгера
+    Dim testLogger As logger
+    Set testLogger = New logger
+    
+    ' Путь к тестовому лог-файлу
+    Dim logPath As String
+    logPath = Environ("TEMP") & "\ExcellentVBA_Tests\Logs\logger_levels_test.log"
+    
+    ' Инициализация логгера
+    testLogger.Initialize logPath, True, True, LogDebug
+    
+    ' Запись сообщений разных уровней
+    testLogger.Log_Debug "Тестовое сообщение уровня DEBUG", "TestLoggingLevels"
+    testLogger.Log_Info "Тестовое сообщение уровня INFO", "TestLoggingLevels"
+    testLogger.Log_Warning "Тестовое сообщение уровня WARNING", "TestLoggingLevels"
+    testLogger.Log_Error "Тестовое сообщение уровня ERROR", "TestLoggingLevels"
+    testLogger.Log_Success "Тестовое сообщение уровня SUCCESS", "TestLoggingLevels"
+    
+    ' Чтение содержимого лог-файла
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    
+    Dim logContent As String
+    logContent = fsManager.ReadTextFile(logPath)
+    
+    ' Проверка наличия всех сообщений
+    TestCase "DEBUG сообщения записываются", InStr(logContent, "DEBUG") > 0
+    TestCase "INFO сообщения записываются", InStr(logContent, "INFO") > 0
+    TestCase "WARNING сообщения записываются", InStr(logContent, "WARNING") > 0
+    TestCase "ERROR сообщения записываются", InStr(logContent, "ERROR") > 0
+    TestCase "SUCCESS сообщения записываются", InStr(logContent, "SUCCESS") > 0
+    
+    ' Тест изменения уровня логирования
+    testLogger.SetLogLevel LogWarning
+    
+    ' Очистка лога
+    fsManager.DeleteFile logPath
+    testLogger.Initialize logPath, True, True, LogWarning
+    
+    ' Запись сообщений разных уровней
+    testLogger.Log_Debug "Это DEBUG сообщение не должно быть записано", "TestLoggingLevels"
+    testLogger.Log_Info "Это INFO сообщение не должно быть записано", "TestLoggingLevels"
+    testLogger.Log_Warning "Это WARNING сообщение должно быть записано", "TestLoggingLevels"
+    testLogger.Log_Error "Это ERROR сообщение должно быть записано", "TestLoggingLevels"
+    
+    ' Чтение нового содержимого
+    logContent = fsManager.ReadTextFile(logPath)
+    
+    ' Проверка фильтрации сообщений по уровню
+    TestCase "DEBUG сообщения фильтруются", InStr(logContent, "DEBUG сообщение не должно быть записано") = 0
+    TestCase "INFO сообщения фильтруются", InStr(logContent, "INFO сообщение не должно быть записано") = 0
+    TestCase "WARNING сообщения проходят фильтр", InStr(logContent, "WARNING сообщение должно быть записано") > 0
+    TestCase "ERROR сообщения проходят фильтр", InStr(logContent, "ERROR сообщение должно быть записано") > 0
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestLoggingLevels", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тест настройки провайдеров логирования
+Private Sub TestProviderConfiguration()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Настройка провайдеров"
+    
+    ' Создание тестового логгера
+    Dim testLogger As logger
+    Set testLogger = New logger
+    
+    ' Путь к тестовому лог-файлу
+    Dim logPath As String
+    logPath = Environ("TEMP") & "\ExcellentVBA_Tests\Logs\logger_providers_test.log"
+    
+    ' Инициализация логгера только с текстовым провайдером
+    testLogger.Initialize logPath, True, False, LogDebug
+    
+    ' Запись тестового сообщения
+    testLogger.Log_Info "Тестовое сообщение для текстового провайдера", "TestProviderConfiguration"
+    
+    ' Проверка существования файла лога
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    TestCase "Текстовый провайдер создает файл лога", fsManager.FileExists(logPath) = True
+    
+    ' Отключение текстового провайдера и включение Immediate провайдера
+    testLogger.EnableTextProvider False
+    testLogger.EnableImmediateProvider True
+    
+    ' Удаление файла лога
+    fsManager.DeleteFile logPath
+    
+    ' Запись нового сообщения
+    testLogger.Log_Info "Это сообщение не должно попасть в файл лога", "TestProviderConfiguration"
+    
+    ' Проверка, что файл лога не создается
+    TestCase "Отключенный текстовый провайдер не создает файл лога", Not fsManager.FileExists(logPath)
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestProviderConfiguration", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Тест ротации лог-файлов
+Private Sub TestLogRotation()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Ротация лог-файлов"
+    
+    ' Создание тестового логгера с маленьким размером файла лога для тестирования ротации
+    Dim testLogger As logger
+    Set testLogger = New logger
+    
+    ' Путь к тестовому лог-файлу
+    Dim logPath As String
+    logPath = Environ("TEMP") & "\ExcellentVBA_Tests\Logs\logger_rotation_test.log"
+    
+    ' Инициализация логгера
+    testLogger.Initialize logPath, True, True, LogDebug
+    
+    ' Установка маленького размера файла для тестирования ротации
+    testLogger.MaxFileSize = 1024 ' 1 КБ
+    
+    ' Запись большого объема данных для активации ротации
+    Dim i As Integer
+    For i = 1 To 50
+        testLogger.Log_Info "Это длинное тестовое сообщение для проверки ротации лог-файлов. Строка " & i & String(100, "."), "TestLogRotation"
+    Next i
+    
+    ' Проверка, что исходный файл лога все еще существует (после ротации создается новый)
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    TestCase "После ротации файл лога существует", fsManager.FileExists(logPath) = True
+    
+    ' Проверка наличия архивных файлов в папке
+    Dim logDir As String
+    logDir = fsManager.GetDirectoryPath(logPath)
+    
+    ' Это упрощенная проверка, в реальном сценарии нужно проверить имена файлов точнее
+    Dim hasArchiveFiles As Boolean
+    hasArchiveFiles = (Dir(logDir & "*.txt") <> "")
+    TestCase "В директории логов есть файлы", hasArchiveFiles
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, "TestLogRotation", Erl, False
+    End If
+    m_TestReporter.EndTestGroup
+End Sub
+
+' Метод тестового случая
+Private Sub TestCase(ByVal TestName As String, ByVal Condition As Boolean)
+    On Error Resume Next
+    
+    ' Проверяем условие
+    If Condition Then
+        m_Logger.Log_Debug "ТЕСТ ПРОЙДЕН: " & TestName, "TestCase"
+        m_TestReporter.ReportTestResult TestName, True
+    Else
+        m_Logger.Log_Error "ТЕСТ НЕ ПРОЙДЕН: " & TestName, "TestCase"
+        m_TestReporter.ReportTestResult TestName, False
+    End If
+End Sub

@@ -1,0 +1,193 @@
+Attribute VB_Name = "FileUtils"
+' Модуль FileUtils
+' Предоставляет вспомогательные функции для работы с файловой системой
+
+Option Explicit
+
+' Проверка существования файла
+Public Function FileExists(ByVal FilePath As String) As Boolean
+    On Error Resume Next
+    FileExists = (Dir(FilePath) <> "")
+    On Error GoTo 0
+End Function
+
+' Проверка существования каталога
+Public Function DirectoryExists(ByVal DirPath As String) As Boolean
+    On Error Resume Next
+    
+    If Right(DirPath, 1) = "\" Then
+        DirectoryExists = (Dir(DirPath, vbDirectory) <> "")
+    Else
+        DirectoryExists = (Dir(DirPath & "\", vbDirectory) <> "")
+    End If
+    
+    On Error GoTo 0
+End Function
+
+' Создание иерархии каталогов (рекурсивно)
+Public Function CreateDirectoryRecursive(ByVal DirPath As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверка параметров
+    If Len(Trim(DirPath)) = 0 Then
+        CreateDirectoryRecursive = False
+        Exit Function
+    End If
+    
+    ' Нормализация пути
+    If Right(DirPath, 1) <> "\" Then DirPath = DirPath & "\"
+    
+    ' Если каталог уже существует, считаем операцию успешной
+    If DirectoryExists(DirPath) Then
+        CreateDirectoryRecursive = True
+        Exit Function
+    End If
+    
+    ' Поиск родительских каталогов и создание их при необходимости
+    Dim parentPath As String
+    Dim parts() As String
+    Dim i As Long
+    
+    ' Разделение пути на части
+    parts = Split(DirPath, "\")
+    parentPath = ""
+    
+    ' Создание каждого уровня каталогов
+    For i = 0 To UBound(parts) - 1  ' -1 потому что последний элемент - пустой (из-за завершающего \)
+        If parts(i) <> "" Then
+            ' Для сетевых путей требуется специальная обработка
+            If i = 0 And Left(parts(i), 2) = "\\" Then
+                parentPath = "\\" & parts(i)
+            Else
+                parentPath = parentPath & parts(i) & "\"
+                
+                ' Создание каталога данного уровня, если он не существует
+                If Not DirectoryExists(parentPath) Then
+                    On Error Resume Next
+                    MkDir parentPath
+                    On Error GoTo ErrorHandler
+                End If
+            End If
+        End If
+    Next i
+    
+    ' Успешное создание всех каталогов
+    CreateDirectoryRecursive = True
+    Exit Function
+    
+ErrorHandler:
+    CreateDirectoryRecursive = False
+    Resume Next
+End Function
+
+' Получение пути к директории из полного пути
+Public Function GetDirectoryPath(ByVal FilePath As String) As String
+    On Error Resume Next
+    
+    Dim lastSlash As Long
+    lastSlash = InStrRev(FilePath, "\")
+    
+    If lastSlash > 0 Then
+        GetDirectoryPath = Left(FilePath, lastSlash)
+    Else
+        GetDirectoryPath = ""
+    End If
+End Function
+
+' Получение имени файла из полного пути
+Public Function GetFileName(ByVal FilePath As String) As String
+    On Error Resume Next
+    
+    Dim lastSlash As Long
+    lastSlash = InStrRev(FilePath, "\")
+    
+    If lastSlash > 0 Then
+        GetFileName = Mid(FilePath, lastSlash + 1)
+    Else
+        GetFileName = FilePath
+    End If
+End Function
+
+' Чтение текстового файла
+Public Function ReadTextFile(ByVal FilePath As String) As String
+    On Error GoTo ErrorHandler
+    
+    ' Проверка существования файла
+    If Not FileExists(FilePath) Then
+        ReadTextFile = ""
+        Exit Function
+    End If
+    
+    ' Чтение файла
+    Dim fileNum As Integer
+    Dim content As String
+    Dim textLine As String
+    
+    fileNum = FreeFile
+    
+    Open FilePath For Input As #fileNum
+    
+    ' Чтение файла построчно
+    Do Until EOF(fileNum)
+        Line Input #fileNum, textLine
+        content = content & textLine & vbCrLf
+    Loop
+    
+    Close #fileNum
+    
+    ' Удаление лишнего перевода строки в конце, если он есть
+    If Len(content) >= 2 Then
+        If Right(content, 2) = vbCrLf Then
+            content = Left(content, Len(content) - 2)
+        End If
+    End If
+    
+    ReadTextFile = content
+    Exit Function
+    
+ErrorHandler:
+    ReadTextFile = ""
+    Resume Next
+End Function
+
+' Запись текстового файла
+Public Function WriteTextFile(ByVal FilePath As String, ByVal content As String, Optional ByVal Append As Boolean = False) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверка параметров
+    If Len(Trim(FilePath)) = 0 Then
+        WriteTextFile = False
+        Exit Function
+    End If
+    
+    ' Создание каталога для файла, если он не существует
+    Dim fileDirPath As String
+    fileDirPath = GetDirectoryPath(FilePath)
+    
+    If Not DirectoryExists(fileDirPath) Then
+        If Not CreateDirectoryRecursive(fileDirPath) Then
+            WriteTextFile = False
+            Exit Function
+        End If
+    End If
+    
+    ' Запись файла
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    
+    If Append And FileExists(FilePath) Then
+        Open FilePath For Append As #fileNum
+    Else
+        Open FilePath For Output As #fileNum
+    End If
+    
+    Print #fileNum, content;  ' Точка с запятой предотвращает добавление дополнительного перевода строки
+    Close #fileNum
+    
+    WriteTextFile = True
+    Exit Function
+    
+ErrorHandler:
+    WriteTextFile = False
+    Resume Next
+End Function

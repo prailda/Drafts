@@ -1,0 +1,192 @@
+Attribute VB_Name = "FileSystemManagerTest"
+' Модуль FileSystemManagerTest
+' Проводит тестирование класса FileSystemManager
+Option Explicit
+
+' Ссылки на глобальные объекты
+Private m_Logger As Object
+Private m_ErrorHandler As Object
+Private m_FSO As FileSystemManager
+Private m_TestReporter As TestReporter
+
+' Тестовые пути
+Private Const TEST_DIR_PATH As String = "C:\Temp\ExcellentVBA_Test\"
+Private Const TEST_FILE_PATH As String = "C:\Temp\ExcellentVBA_Test\test_file.txt"
+Private Const TEST_FILE_CONTENT As String = "Это тестовое содержимое файла для проверки FileSystemManager."
+
+' Запуск тестов FileSystemManager
+Public Sub RunFileSystemManagerTests()
+    On Error GoTo ErrorHandler
+    
+    ' Инициализация
+    Set m_Logger = GetLogger()
+    Set m_ErrorHandler = GetErrorHandler()
+    Set m_FSO = New FileSystemManager
+    Set m_TestReporter = New TestReporter
+    
+    m_Logger.Log_Info "Запуск тестирования FileSystemManager", "FileSystemManagerTest"
+    m_TestReporter.StartReport
+    
+    ' Тестирование работы с каталогами
+    TestDirectoryOperations
+    
+    ' Тестирование работы с файлами
+    TestFileOperations
+    
+    ' Тестирование работы с путями
+    TestPathOperations
+    
+    ' Очистка тестовых данных
+    CleanupTestData
+    
+    m_TestReporter.FinishReport m_TestsPassed, m_TestsFailed, m_TestsTotal
+    
+    ' Отображение результатов
+    MsgBox "Тестирование FileSystemManager успешно завершено!" & vbCrLf & vbCrLf & _
+           "Отчет сохранен в: " & m_TestReporter.GetReportPath, vbInformation, "Тест"
+    
+    Exit Sub
+    
+ErrorHandler:
+    m_ErrorHandler.HandleError Err.Number, Err.Description, "RunFileSystemManagerTests", Erl, True
+    
+    ' Очистка тестовых данных даже при ошибке
+    CleanupTestData
+End Sub
+
+Private Sub TestDirectoryOperations()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Операции с каталогами"
+    
+    ' Тест DirectoryExists
+    If m_FSO.DirectoryExists(TEST_DIR_PATH) Then
+        ' Если каталог существует, удалим его перед тестированием
+        On Error Resume Next
+        RmDir TEST_DIR_PATH
+        On Error GoTo ErrorHandler
+    End If
+    
+    TestCase "DirectoryExists с несуществующим каталогом", m_FSO.DirectoryExists(TEST_DIR_PATH) = False
+    
+    ' Тест CreateDirectory
+    TestCase "CreateDirectory", m_FSO.CreateDirectory(TEST_DIR_PATH) = True
+    TestCase "DirectoryExists после создания", m_FSO.DirectoryExists(TEST_DIR_PATH) = True
+    
+    ' Тест CreateDirectoryRecursive
+    Dim nestedPath As String
+    nestedPath = TEST_DIR_PATH & "nested1\nested2\nested3\"
+    
+    TestCase "CreateDirectoryRecursive", m_FSO.CreateDirectoryRecursive(nestedPath) = True
+    TestCase "DirectoryExists для вложенного каталога", m_FSO.DirectoryExists(nestedPath) = True
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    m_ErrorHandler.HandleError Err.Number, Err.Description, "TestDirectoryOperations", Erl, True
+    m_TestReporter.EndTestGroup
+End Sub
+
+Private Sub TestFileOperations()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Операции с файлами"
+    
+    ' Тест FileExists
+    If m_FSO.FileExists(TEST_FILE_PATH) Then
+        ' Если файл существует, удалим его перед тестированием
+        m_FSO.DeleteFile TEST_FILE_PATH
+    End If
+    
+    TestCase "FileExists с несуществующим файлом", m_FSO.FileExists(TEST_FILE_PATH) = False
+    
+    ' Тест WriteTextFile
+    TestCase "WriteTextFile", m_FSO.WriteTextFile(TEST_FILE_PATH, TEST_FILE_CONTENT, False) = True
+    TestCase "FileExists после создания", m_FSO.FileExists(TEST_FILE_PATH) = True
+    
+    ' Тест ReadTextFile
+    Dim readContent As String
+    readContent = m_FSO.ReadTextFile(TEST_FILE_PATH)
+    TestCase "ReadTextFile содержимое", readContent = TEST_FILE_CONTENT
+    
+    ' Тест CopyFile
+    Dim copyPath As String
+    copyPath = TEST_DIR_PATH & "test_file_copy.txt"
+    
+    If m_FSO.FileExists(copyPath) Then
+        m_FSO.DeleteFile copyPath
+    End If
+    
+    TestCase "CopyFile", m_FSO.CopyFile(TEST_FILE_PATH, copyPath, False) = True
+    TestCase "FileExists для копии", m_FSO.FileExists(copyPath) = True
+    
+    ' Тест DeleteFile
+    TestCase "DeleteFile", m_FSO.DeleteFile(copyPath) = True
+    TestCase "FileExists после удаления", m_FSO.FileExists(copyPath) = False
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    m_ErrorHandler.HandleError Err.Number, Err.Description, "TestFileOperations", Erl, True
+    m_TestReporter.EndTestGroup
+End Sub
+
+Private Sub TestPathOperations()
+    On Error GoTo ErrorHandler
+    
+    m_TestReporter.StartTestGroup "Операции с путями"
+    
+    ' Тест GetFileName
+    TestCase "GetFileName с полным путем", m_FSO.GetFileName("C:\folder\file.txt") = "file.txt"
+    TestCase "GetFileName с именем файла", m_FSO.GetFileName("file.txt") = "file.txt"
+    TestCase "GetFileName с UNC путем", m_FSO.GetFileName("\\server\share\file.txt") = "file.txt"
+    
+    ' Тест GetDirectoryPath
+    TestCase "GetDirectoryPath с полным путем", m_FSO.GetDirectoryPath("C:\folder\file.txt") = "C:\folder\"
+    TestCase "GetDirectoryPath с именем файла", m_FSO.GetDirectoryPath("file.txt") = ""
+    TestCase "GetDirectoryPath с UNC путем", m_FSO.GetDirectoryPath("\\server\share\file.txt") = "\\server\share\"
+    
+    m_TestReporter.EndTestGroup
+    Exit Sub
+    
+ErrorHandler:
+    m_ErrorHandler.HandleError Err.Number, Err.Description, "TestPathOperations", Erl, True
+    m_TestReporter.EndTestGroup
+End Sub
+
+Private Sub CleanupTestData()
+    On Error Resume Next
+    
+    m_Logger.Log_Info "Очистка тестовых данных", "CleanupTestData"
+    
+    ' Удаление тестового файла
+    If m_FSO.FileExists(TEST_FILE_PATH) Then
+        m_FSO.DeleteFile TEST_FILE_PATH
+    End If
+    
+    ' Удаление тестового каталога (рекурсивно)
+    If m_FSO.DirectoryExists(TEST_DIR_PATH) Then
+        ' В VBA нет прямой функции для рекурсивного удаления каталога,
+        ' поэтому используем команду cmd
+        Dim command As String
+        command = "cmd.exe /c rd /s /q """ & TEST_DIR_PATH & """"
+        Shell command, vbHide
+    End If
+End Sub
+
+    ' Метод тестового случая
+Private Sub TestCase(ByVal TestName As String, ByVal Condition As Boolean)
+    On Error Resume Next
+    
+    ' Проверяем условие
+    If Condition Then
+        m_Logger.Log_Debug "ТЕСТ ПРОЙДЕН: " & TestName, "TestCase"
+        m_TestReporter.ReportTestResult TestName, True
+    Else
+        m_Logger.Log_Error "ТЕСТ НЕ ПРОЙДЕН: " & TestName, "TestCase"
+        m_TestReporter.ReportTestResult TestName, False
+    End If
+End Sub
+

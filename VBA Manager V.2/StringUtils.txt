@@ -1,0 +1,120 @@
+Attribute VB_Name = "StringUtils"
+' Модуль StringUtils
+' Предоставляет вспомогательные функции для работы со строками
+
+Option Explicit
+
+' Проверка, является ли символ буквой
+Public Function IsLetter(ByVal Char As String) As Boolean
+    On Error Resume Next
+    
+    If Len(Char) <> 1 Then
+        IsLetter = False
+        Exit Function
+    End If
+    
+    IsLetter = ((Char >= "A" And Char <= "Z") Or (Char >= "a" And Char <= "z"))
+End Function
+
+' Проверка, является ли символ цифрой
+Public Function IsDigit(ByVal Char As String) As Boolean
+    On Error Resume Next
+    
+    If Len(Char) <> 1 Then
+        IsDigit = False
+        Exit Function
+    End If
+    
+    IsDigit = (Char >= "0" And Char <= "9")
+End Function
+
+' Проверка, является ли слово зарезервированным в VBA
+Public Function IsVBAReservedWord(ByVal Word As String) As Boolean
+    On Error Resume Next
+    
+    Dim reservedWords() As String
+    Dim i As Integer
+    
+    ' Список зарезервированных слов VBA (основные)
+    reservedWords = Split("And As Boolean ByRef Byte ByVal Call Case Class Const Currency Debug Dim Do Double Each " & _
+                     "Else ElseIf Empty End Enum Eqv Error Event Exit False For Friend Function Get Global " & _
+                     "GoTo If Imp Implements In Integer Is Let Lib Like Long Loop Me Mod New Next Not " & _
+                     "Nothing Null Object On Option Optional Or ParamArray Preserve Private Property Public " & _
+                     "RaiseEvent ReDim Rem Resume Return Select Set Single Static Stop String Sub Then To " & _
+                     "True Type TypeOf Until Variant Wend While With WithEvents", " ")
+    
+    ' Преобразование искомого слова к верхнему регистру для сравнения
+    Dim upperWord As String
+    upperWord = UCase(Word)
+    
+    For i = LBound(reservedWords) To UBound(reservedWords)
+        If upperWord = UCase(reservedWords(i)) Then
+            IsVBAReservedWord = True
+            Exit Function
+        End If
+    Next i
+    
+    IsVBAReservedWord = False
+End Function
+
+' Очистка строки от недопустимых символов для имени VBA-компонента
+Public Function CleanVBAName(ByVal Name As String) As String
+    On Error Resume Next
+    
+    ' Проверка на пустую строку
+    If Len(Name) = 0 Then
+        CleanVBAName = "Module1"
+        Exit Function
+    End If
+    
+    Dim result As String
+    result = Name
+    
+    ' Замена недопустимых символов
+    Dim i As Integer
+    For i = 1 To Len(result)
+        Dim currentChar As String
+        currentChar = Mid(result, i, 1)
+        
+        ' Если символ недопустимый, заменяем его на подчёркивание
+        If Not (IsLetter(currentChar) Or IsDigit(currentChar) Or currentChar = "_") Then
+            Mid(result, i, 1) = "_"
+        End If
+    Next i
+    
+    ' Если первый символ не буква, добавляем префикс
+    If Not IsLetter(Left(result, 1)) Then
+        result = "m_" & result
+    End If
+    
+    ' Обрезаем до максимально допустимой длины имени в VBA (31 символ)
+    If Len(result) > 31 Then
+        result = Left(result, 31)
+    End If
+    
+    ' Проверка на зарезервированное слово
+    If IsVBAReservedWord(result) Then
+        result = result & "_"
+    End If
+    
+    CleanVBAName = result
+End Function
+
+' Форматирование пути к файлу
+Public Function FormatPath(ByVal Path As String) As String
+    On Error Resume Next
+    
+    Dim result As String
+    result = Path
+    
+    ' Заменяем прямые слеши на обратные
+    result = Replace(result, "/", "\")
+    
+    ' Убираем лишние обратные слеши
+    Do While InStr(result, "\\") > 0
+        result = Replace(result, "\\", "\")
+    Loop
+    
+    FormatPath = result
+End Function
+

@@ -1,0 +1,421 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "FileSystemManager"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+' Класс FileSystemManager
+' Предоставляет функции для работы с файловой системой
+' Оптимизирован для работы с файлами конфигурации и VBA-компонентами
+
+Option Explicit
+
+' Константы
+Private Const MODULE_NAME As String = "FileSystemManager"
+
+' Ссылки на глобальные объекты
+Private m_Logger As Object
+Private m_ErrorHandler As Object
+
+' Инициализация
+Private Sub Class_Initialize()
+    Set m_Logger = GetLogger()
+    Set m_ErrorHandler = GetErrorHandler()
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "FileSystemManager инициализирован", MODULE_NAME
+        End If
+    End If
+End Sub
+
+' Проверка существования каталога
+Public Function DirectoryExists(ByVal DirPath As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    If Len(Trim(DirPath)) = 0 Then
+        DirectoryExists = False
+        Exit Function
+    End If
+    
+    ' Обработка завершающего слеша
+    If Right(DirPath, 1) = "\" Then
+        DirectoryExists = (Dir(DirPath, vbDirectory) <> "")
+    Else
+        DirectoryExists = (Dir(DirPath & "\", vbDirectory) <> "")
+    End If
+    
+    ' Логирование результата
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Debug "Проверка существования каталога " & DirPath & " - " & DirectoryExists, MODULE_NAME
+        End If
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".DirectoryExists", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".DirectoryExists" & ": " & Err.Number & " - " & Err.Description
+    End If
+    DirectoryExists = False
+    Resume Next
+End Function
+
+' Создание каталога
+Public Function CreateDirectory(ByVal DirPath As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверка параметров
+    If Len(Trim(DirPath)) = 0 Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Warning "Попытка создания каталога с пустым путем", MODULE_NAME
+            End If
+        End If
+        CreateDirectory = False
+        Exit Function
+    End If
+    
+    ' Если каталог уже существует, считаем операцию успешной
+    If DirectoryExists(DirPath) Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Debug "Каталог уже существует: " & DirPath, MODULE_NAME
+            End If
+        End If
+        CreateDirectory = True
+        Exit Function
+    End If
+    
+    ' Создание каталога
+    MkDir DirPath
+    
+    ' Проверка успешности создания
+    If DirectoryExists(DirPath) Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Info "Каталог создан: " & DirPath, MODULE_NAME
+            End If
+        End If
+        CreateDirectory = True
+    Else
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Error "Не удалось создать каталог: " & DirPath, MODULE_NAME
+            End If
+        End If
+        CreateDirectory = False
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".CreateDirectory", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".CreateDirectory" & ": " & Err.Number & " - " & Err.Description
+    End If
+    CreateDirectory = False
+    Resume Next
+End Function
+
+' Создание иерархии каталогов (рекурсивно)
+Public Function CreateDirectoryRecursive(ByVal DirPath As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Вызываем функцию из модуля FileUtils
+    CreateDirectoryRecursive = FileUtils.CreateDirectoryRecursive(DirPath)
+    
+    ' Логирование
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            If CreateDirectoryRecursive Then
+                m_Logger.Log_Info "Иерархия каталогов успешно создана: " & DirPath, MODULE_NAME
+            Else
+                m_Logger.Log_Error "Не удалось создать иерархию каталогов: " & DirPath, MODULE_NAME
+            End If
+        End If
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".CreateDirectoryRecursive", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".CreateDirectoryRecursive" & ": " & Err.Number & " - " & Err.Description
+    End If
+    CreateDirectoryRecursive = False
+    Resume Next
+End Function
+
+' Проверка существования файла
+Public Function FileExists(ByVal FilePath As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    FileExists = FileUtils.FileExists(FilePath)
+    
+    ' Логирование результата
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Debug "Проверка существования файла " & FilePath & " - " & FileExists, MODULE_NAME
+        End If
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".FileExists", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".FileExists" & ": " & Err.Number & " - " & Err.Description
+    End If
+    FileExists = False
+    Resume Next
+End Function
+
+' Проверка возможности записи в файл
+Public Function CanWriteToFile(ByVal FilePath As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    If Len(Trim(FilePath)) = 0 Then
+        CanWriteToFile = False
+        Exit Function
+    End If
+    
+    ' Создание каталога для файла, если он не существует
+    Dim fileDirPath As String
+    fileDirPath = FileUtils.GetDirectoryPath(FilePath)
+    
+    If Not DirectoryExists(fileDirPath) Then
+        If Not CreateDirectoryRecursive(fileDirPath) Then
+            CanWriteToFile = False
+            Exit Function
+        End If
+    End If
+    
+    ' Попытка открыть файл для записи
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    
+    On Error Resume Next
+    Open FilePath For Append As #fileNum
+    CanWriteToFile = (Err.Number = 0)
+    Close #fileNum
+    On Error GoTo ErrorHandler
+    
+    ' Логирование результата
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Debug "Проверка возможности записи в файл " & FilePath & " - " & CanWriteToFile, MODULE_NAME
+        End If
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".CanWriteToFile", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".CanWriteToFile" & ": " & Err.Number & " - " & Err.Description
+    End If
+    CanWriteToFile = False
+    Resume Next
+End Function
+
+' Чтение текстового файла
+Public Function ReadTextFile(ByVal FilePath As String) As String
+    On Error GoTo ErrorHandler
+    
+    ReadTextFile = FileUtils.ReadTextFile(FilePath)
+    
+    ' Логирование результата
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Debug "Файл прочитан " & FilePath & " (" & Len(ReadTextFile) & " символов)", MODULE_NAME
+        End If
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ReadTextFile", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".ReadTextFile" & ": " & Err.Number & " - " & Err.Description
+    End If
+    ReadTextFile = ""
+    Resume Next
+End Function
+
+' Запись текстового файла
+Public Function WriteTextFile(ByVal FilePath As String, ByVal content As String, Optional ByVal Append As Boolean = False) As Boolean
+    On Error GoTo ErrorHandler
+    
+    WriteTextFile = FileUtils.WriteTextFile(FilePath, content, Append)
+    
+    ' Логирование результата
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            If WriteTextFile Then
+                If Append Then
+                    m_Logger.Log_Debug "Текст добавлен в файл " & FilePath & " (" & Len(content) & " символов)", MODULE_NAME
+                Else
+                    m_Logger.Log_Debug "Файл записан " & FilePath & " (" & Len(content) & " символов)", MODULE_NAME
+                End If
+            Else
+                m_Logger.Log_Error "Ошибка записи в файл " & FilePath, MODULE_NAME
+            End If
+        End If
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".WriteTextFile", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".WriteTextFile" & ": " & Err.Number & " - " & Err.Description
+    End If
+    WriteTextFile = False
+    Resume Next
+End Function
+
+' Получение имени файла из полного пути
+Public Function GetFileName(ByVal FilePath As String) As String
+    GetFileName = FileUtils.GetFileName(FilePath)
+End Function
+
+' Получение пути к директории из полного пути
+Public Function GetDirectoryPath(ByVal FilePath As String) As String
+    GetDirectoryPath = FileUtils.GetDirectoryPath(FilePath)
+End Function
+
+' Копирование файла
+Public Function CopyFile(ByVal SourcePath As String, ByVal DestPath As String, Optional ByVal Overwrite As Boolean = False) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверка существования исходного файла
+    If Not FileExists(SourcePath) Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Warning "Попытка копирования несуществующего файла " & SourcePath, MODULE_NAME
+            End If
+        End If
+        CopyFile = False
+        Exit Function
+    End If
+    
+    ' Проверка существования конечного файла, если перезапись запрещена
+    If Not Overwrite And FileExists(DestPath) Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Warning "Файл назначения уже существует и перезапись запрещена " & DestPath, MODULE_NAME
+            End If
+        End If
+        CopyFile = False
+        Exit Function
+    End If
+    
+    ' Создание каталога назначения, если он не существует
+    Dim destDirPath As String
+    destDirPath = FileUtils.GetDirectoryPath(DestPath)
+    
+    If Not DirectoryExists(destDirPath) Then
+        If Not CreateDirectoryRecursive(destDirPath) Then
+            CopyFile = False
+            Exit Function
+        End If
+    End If
+    
+    ' Копирование файла
+    FileCopy SourcePath, DestPath
+    
+    ' Проверка успешности копирования
+    If FileExists(DestPath) Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Info "Файл скопирован " & SourcePath & " -> " & DestPath, MODULE_NAME
+            End If
+        End If
+        CopyFile = True
+    Else
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Error "Не удалось скопировать файл " & SourcePath & " -> " & DestPath, MODULE_NAME
+            End If
+        End If
+        CopyFile = False
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".CopyFile", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".CopyFile" & ": " & Err.Number & " - " & Err.Description
+    End If
+    CopyFile = False
+    Resume Next
+End Function
+
+' Удаление файла
+Public Function DeleteFile(ByVal FilePath As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверка существования файла
+    If Not FileExists(FilePath) Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Warning "Попытка удаления несуществующего файла " & FilePath, MODULE_NAME
+            End If
+        End If
+        DeleteFile = True  ' Считаем операцию успешной, т.к. файла и так нет
+        Exit Function
+    End If
+    
+    ' Удаление файла
+    Kill FilePath
+    
+    ' Проверка успешности удаления
+    If Not FileExists(FilePath) Then
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Info "Файл удален " & FilePath, MODULE_NAME
+            End If
+        End If
+        DeleteFile = True
+    Else
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                m_Logger.Log_Error "Не удалось удалить файл " & FilePath, MODULE_NAME
+            End If
+        End If
+        DeleteFile = False
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".DeleteFile", Erl, False
+    Else
+        Debug.Print "Ошибка в " & MODULE_NAME & ".DeleteFile" & ": " & Err.Number & " - " & Err.Description
+    End If
+    DeleteFile = False
+    Resume Next
+End Function
+
+' Освобождение ресурсов
+Private Sub Class_Terminate()
+    On Error Resume Next
+    Set m_Logger = Nothing
+    Set m_ErrorHandler = Nothing
+End Sub

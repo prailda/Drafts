@@ -1,0 +1,194 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "TestReporter"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+' Класс TestReporter
+' Формирует отчеты о тестировании в HTML формате
+Option Explicit
+
+' Свойства
+Private m_ReportPath As String
+Private m_LogPath As String
+Private m_ReportContent As String
+Private m_CurrentGroup As String
+Private m_CurrentGroupPassed As Long
+Private m_CurrentGroupFailed As Long
+Private m_ReportStartTime As Date
+
+' Инициализация
+Private Sub Class_Initialize()
+    ' Установка пути для отчета по умолчанию
+    m_ReportPath = Environ("TEMP") & "\ExcellentVBA_Tests\Reports\TestReport_" & Format(Now(), "yyyymmdd_hhnnss") & ".html"
+    
+    ' Создание директории для отчетов при необходимости
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    fsManager.CreateDirectoryRecursive Environ("TEMP") & "\ExcellentVBA_Tests\Reports\"
+End Sub
+
+' Установка пути к лог-файлу
+Public Sub SetLogPath(ByVal logPath As String)
+    m_LogPath = logPath
+End Sub
+
+' Получение пути к отчету
+Public Function GetReportPath() As String
+    GetReportPath = m_ReportPath
+End Function
+
+' Начало формирования отчета
+Public Sub StartReport()
+    m_ReportStartTime = Now()
+    
+    ' Формирование заголовка отчета упрощенным способом
+    m_ReportContent = GetReportHeader()
+End Sub
+
+' Начало группы тестов
+Public Sub StartTestGroup(ByVal GroupName As String)
+    ' Завершаем предыдущую группу, если она была
+    If Len(m_CurrentGroup) > 0 Then
+        EndTestGroup
+    End If
+    
+    m_CurrentGroup = GroupName
+    m_CurrentGroupPassed = 0
+    m_CurrentGroupFailed = 0
+    
+    ' Добавление заголовка группы
+    m_ReportContent = m_ReportContent & "<div class=""group"">" & vbCrLf & _
+                      "<div class=""group-header"">" & vbCrLf & _
+                      "<h2>" & GroupName & "</h2>" & vbCrLf & _
+                      "<span class=""stats"" id=""stats-" & CleanIdName(GroupName) & """></span>" & vbCrLf & _
+                      "</div>" & vbCrLf & _
+                      "<div class=""test-results"">" & vbCrLf
+End Sub
+
+' Завершение группы тестов
+Public Sub EndTestGroup()
+    If Len(m_CurrentGroup) = 0 Then Exit Sub
+    
+    ' Обновление статистики группы
+    Dim statsHtml As String
+    statsHtml = "Пройдено: " & m_CurrentGroupPassed & ", Не пройдено: " & m_CurrentGroupFailed
+    
+    ' Закрытие группы
+    m_ReportContent = m_ReportContent & "</div>" & vbCrLf & _
+                      "<script>document.getElementById('stats-" & CleanIdName(m_CurrentGroup) & "').innerHTML = '" & statsHtml & "';</script>" & vbCrLf & _
+                      "</div>" & vbCrLf
+    
+    m_CurrentGroup = ""
+End Sub
+
+' Отчет о результате теста
+Public Sub ReportTestResult(ByVal TestName As String, ByVal Passed As Boolean)
+    ' Обновление счетчиков
+    If Passed Then
+        m_CurrentGroupPassed = m_CurrentGroupPassed + 1
+    Else
+        m_CurrentGroupFailed = m_CurrentGroupFailed + 1
+    End If
+    
+    ' Добавление результата теста
+    Dim resultClass As String
+    resultClass = IIf(Passed, "pass", "fail")
+    
+    m_ReportContent = m_ReportContent & "<div class=""test-item " & resultClass & """>" & _
+                      IIf(Passed, "? ", "? ") & TestName & "</div>" & vbCrLf
+End Sub
+
+' Завершение отчета
+Public Sub FinishReport(ByVal Passed As Long, ByVal Failed As Long, ByVal Total As Long)
+    ' Завершаем текущую группу, если она открыта
+    If Len(m_CurrentGroup) > 0 Then
+        EndTestGroup
+    End If
+    
+    ' Добавление итогов
+    m_ReportContent = m_ReportContent & GetReportSummary(Passed, Failed, Total)
+    
+    ' Закрытие HTML-документа
+    m_ReportContent = m_ReportContent & "</body>" & vbCrLf & "</html>"
+    
+    ' Запись отчета в файл
+    WriteReport
+End Sub
+
+' Запись отчета в файл
+Private Sub WriteReport()
+    On Error Resume Next
+    
+    Dim fsManager As FileSystemManager
+    Set fsManager = GetFileSystemManager()
+    
+    fsManager.WriteTextFile m_ReportPath, m_ReportContent, False
+End Sub
+
+' Получение заголовка отчета
+Private Function GetReportHeader() As String
+    GetReportHeader = "<!DOCTYPE html>" & vbCrLf & _
+                      "<html><head><meta charset=""UTF-8"">" & vbCrLf & _
+                      "<title>Отчет о тестировании VBA Manager</title>" & vbCrLf & _
+                      "<style>" & vbCrLf & _
+                      "body{font-family:Arial,sans-serif;margin:20px}" & vbCrLf & _
+                      "h1{color:#2c3e50}h2{color:#3498db;margin-top:30px}" & vbCrLf & _
+                      ".summary{background-color:#f8f9fa;padding:15px;border-radius:5px}" & vbCrLf & _
+                      ".group{margin:20px 0;padding:10px;border:1px solid #ddd;border-radius:5px}" & vbCrLf & _
+                      ".group-header{display:flex;justify-content:space-between}" & vbCrLf & _
+                      ".test-results{margin-left:20px}" & vbCrLf & _
+                      ".test-item{margin:5px 0;padding:5px;border-radius:3px}" & vbCrLf & _
+                      ".pass{background-color:#d4edda;color:#155724}" & vbCrLf & _
+                      ".fail{background-color:#f8d7da;color:#721c24}" & vbCrLf & _
+                      ".stats{font-weight:bold}.timestamp{color:#6c757d;font-size:0.9em}" & vbCrLf & _
+                      "</style></head><body>" & vbCrLf & _
+                      "<h1>Отчет о тестировании VBA Manager</h1>" & vbCrLf & _
+                      "<p class=""timestamp"">Время начала: " & Format(m_ReportStartTime, "dd.mm.yyyy hh:mm:ss") & "</p>" & vbCrLf
+End Function
+
+' Получение итогов отчета
+Private Function GetReportSummary(ByVal Passed As Long, ByVal Failed As Long, ByVal Total As Long) As String
+    Dim endTime As Date
+    endTime = Now()
+    
+    Dim Duration As String
+    Duration = Format(endTime - m_ReportStartTime, "hh:mm:ss")
+    
+    Dim successRate As String
+    If Total > 0 Then
+        successRate = Format(Passed / Total * 100, "0.00") & "%"
+    Else
+        successRate = "N/A"
+    End If
+    
+    GetReportSummary = "<div class=""summary"">" & vbCrLf & _
+                      "<h2>Итоги тестирования</h2>" & vbCrLf & _
+                      "<p><strong>Всего тестов:</strong> " & Total & "</p>" & vbCrLf & _
+                      "<p><strong>Успешных:</strong> " & Passed & "</p>" & vbCrLf & _
+                      "<p><strong>Неудачных:</strong> " & Failed & "</p>" & vbCrLf & _
+                      "<p><strong>Успешность:</strong> " & successRate & "</p>" & vbCrLf & _
+                      "<p><strong>Время выполнения:</strong> " & Duration & "</p>" & vbCrLf & _
+                      "<p><strong>Журнал:</strong> " & m_LogPath & "</p>" & vbCrLf & _
+                      "</div>" & vbCrLf
+End Function
+
+' Очистка имени для использования в качестве ID в HTML
+Private Function CleanIdName(ByVal Name As String) As String
+    Dim result As String
+    result = Name
+    
+    ' Удаление всех недопустимых символов
+    Dim i As Integer
+    For i = 1 To Len(result)
+        If Not (StringUtils.IsLetter(Mid(result, i, 1)) Or StringUtils.IsDigit(Mid(result, i, 1)) Or Mid(result, i, 1) = "-" Or Mid(result, i, 1) = "_") Then
+            Mid(result, i, 1) = "-"
+        End If
+    Next i
+    
+    CleanIdName = result
+End Function
+

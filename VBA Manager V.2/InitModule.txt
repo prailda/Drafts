@@ -1,0 +1,80 @@
+Attribute VB_Name = "InitModule"
+' Module: InitModule
+Option Explicit
+
+' Инициализация системы логирования
+Public Function InitializeLogging() As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Получение объектов через SupportModule
+    Dim configManager As configManager
+    Set configManager = GetConfigManager()
+    
+    Dim loggerInstance As logger
+    Set loggerInstance = GetLogger()
+    
+    ' Получение настроек логирования
+    Dim logsEnabled As Boolean
+    Dim LogLevel As String
+    Dim textLoggerEnabled As Boolean
+    Dim immediateLoggerEnabled As Boolean
+    Dim logPath As String
+    
+    logsEnabled = configManager.GetConfigValueBool("Logging", "LogsEnabled", True)
+    LogLevel = configManager.GetConfigValue("Logging", "LogLevel", "Debug")
+    textLoggerEnabled = configManager.GetConfigValueBool("Logging", "LogProviderTextEnabled", True)
+    immediateLoggerEnabled = configManager.GetConfigValueBool("Logging", "LogProviderImmediateEnabled", True)
+    logPath = configManager.GetConfigValue("Logging", "LogTextFilePath", "C:\Logs\") + "ExcellentLogs.txt"
+    
+    ' Преобразование строкового уровня логирования в LogLevel
+    Dim logLevelEnum As LogLevel
+    Select Case LCase(LogLevel)
+        Case "debug":   logLevelEnum = LogDebug
+        Case "info":    logLevelEnum = LogInfo
+        Case "warning": logLevelEnum = LogWarning
+        Case "error":   logLevelEnum = LogError
+        Case Else:      logLevelEnum = LogDebug
+    End Select
+    
+    ' Инициализация логгера
+    InitializeLogging = loggerInstance.Initialize(logPath, textLoggerEnabled, immediateLoggerEnabled, logLevelEnum)
+    
+    Exit Function
+    
+ErrorHandler:
+    Debug.Print "Ошибка при инициализации логирования: " & Err.Number & " - " & Err.Description
+    InitializeLogging = False
+    Resume Next
+End Function
+
+' Инициализация системы обработки ошибок
+Public Function InitializeErrorHandler() As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Получение объектов через SupportModule
+    Dim configManager As configManager
+    Set configManager = GetConfigManager()
+    
+    Dim errorHandlerInstance As ErrorHandler
+    Set errorHandlerInstance = GetErrorHandler()
+    
+    ' Получение настроек обработчика ошибок
+    Dim ShowErrors As Boolean
+    Dim LogErrors As Boolean
+    Dim DetailedErrorInfo As Boolean
+    
+    ShowErrors = configManager.GetConfigValueBool("Errors", "ShowErrors", True)
+    LogErrors = configManager.GetConfigValueBool("Errors", "LogErrors", True)
+    DetailedErrorInfo = configManager.GetConfigValueBool("Errors", "DetailedErrorInfo", True)
+    
+    ' Настройка обработчика ошибок
+    errorHandlerInstance.Configure ShowErrors, LogErrors, DetailedErrorInfo
+    
+    InitializeErrorHandler = True
+    Exit Function
+    
+ErrorHandler:
+    Debug.Print "Ошибка при инициализации обработчика ошибок: " & Err.Number & " - " & Err.Description
+    InitializeErrorHandler = False
+    Resume Next
+End Function

@@ -1,0 +1,367 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "UIManager"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+' Класс UIManager
+' Обеспечивает централизованное управление пользовательским интерфейсом
+Option Explicit
+
+' Константы
+Private Const MODULE_NAME As String = "UIManager"
+
+' Ссылки на глобальные объекты
+Private m_Logger As Object
+Private m_ErrorHandler As Object
+
+' Инициализация
+Private Sub Class_Initialize()
+    ' Инициализация логгера и обработчика ошибок
+    Set m_Logger = GetLogger()
+    Set m_ErrorHandler = GetErrorHandler()
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "UIManager инициализирован", MODULE_NAME
+        End If
+    End If
+End Sub
+
+' Отображение информационного сообщения
+Public Function ShowInfoMessage(ByVal Message As String, Optional ByVal Title As String = "Информация") As VbMsgBoxResult
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Отображение информационного сообщения: " & Message, MODULE_NAME
+        End If
+    End If
+    
+    ShowInfoMessage = MsgBox(Message, vbInformation + vbOKOnly, Title)
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ShowInfoMessage", Erl, False
+    End If
+    ShowInfoMessage = vbOK
+End Function
+
+' Отображение предупреждающего сообщения
+Public Function ShowWarningMessage(ByVal Message As String, Optional ByVal Title As String = "Предупреждение") As VbMsgBoxResult
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Warning "Отображение предупреждения: " & Message, MODULE_NAME
+        End If
+    End If
+    
+    ShowWarningMessage = MsgBox(Message, vbExclamation + vbOKOnly, Title)
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ShowWarningMessage", Erl, False
+    End If
+    ShowWarningMessage = vbOK
+End Function
+
+' Отображение сообщения об ошибке
+Public Function ShowErrorMessage(ByVal Message As String, Optional ByVal Title As String = "Ошибка") As VbMsgBoxResult
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Error "Отображение сообщения об ошибке: " & Message, MODULE_NAME
+        End If
+    End If
+    
+    ShowErrorMessage = MsgBox(Message, vbCritical + vbOKOnly, Title)
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ShowErrorMessage", Erl, False
+    End If
+    ShowErrorMessage = vbOK
+End Function
+
+' Отображение диалога подтверждения
+Public Function ShowConfirmMessage(ByVal Message As String, Optional ByVal Title As String = "Подтверждение") As VbMsgBoxResult
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Отображение диалога подтверждения: " & Message, MODULE_NAME
+        End If
+    End If
+    
+    ShowConfirmMessage = MsgBox(Message, vbQuestion + vbYesNo, Title)
+    
+    ' Логирование выбора пользователя
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            If ShowConfirmMessage = vbYes Then
+                m_Logger.Log_Debug "Пользователь выбрал 'Да'", MODULE_NAME
+            Else
+                m_Logger.Log_Debug "Пользователь выбрал 'Нет'", MODULE_NAME
+            End If
+        End If
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ShowConfirmMessage", Erl, False
+    End If
+    ShowConfirmMessage = vbNo
+End Function
+
+' Диалог с тремя вариантами выбора (Да/Нет/Отмена)
+Public Function ShowYesNoCancelMessage(ByVal Message As String, Optional ByVal Title As String = "Выберите действие") As VbMsgBoxResult
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Отображение диалога с тремя вариантами: " & Message, MODULE_NAME
+        End If
+    End If
+    
+    ShowYesNoCancelMessage = MsgBox(Message, vbQuestion + vbYesNoCancel, Title)
+    
+    ' Логирование выбора пользователя
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            Select Case ShowYesNoCancelMessage
+                Case vbYes
+                    m_Logger.Log_Debug "Пользователь выбрал 'Да'", MODULE_NAME
+                Case vbNo
+                    m_Logger.Log_Debug "Пользователь выбрал 'Нет'", MODULE_NAME
+                Case vbCancel
+                    m_Logger.Log_Debug "Пользователь выбрал 'Отмена'", MODULE_NAME
+            End Select
+        End If
+    End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ShowYesNoCancelMessage", Erl, False
+    End If
+    ShowYesNoCancelMessage = vbCancel
+End Function
+
+' Показать диалог обработки дублирования имени
+Public Function ShowDuplicateNameDialog(ByVal ObjectName As String, Optional ByVal ObjectType As String = "объект") As DuplicateNameAction
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Warning "Обнаружено дублирование имени: " & ObjectName, MODULE_NAME
+        End If
+    End If
+    
+    ' Предложение пользователю выбрать действие
+    Dim msg As String
+    msg = ObjectType & " с именем '" & ObjectName & "' уже существует." & vbCrLf & vbCrLf & _
+          "Выберите действие:" & vbCrLf & _
+          "- [Да] Добавить суффикс к имени" & vbCrLf & _
+          "- [Нет] Пропустить этот объект" & vbCrLf & _
+          "- [Отмена] Отменить операцию"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNoCancel, "Дублирование имени")
+    
+    Select Case response
+        Case vbYes
+            ShowDuplicateNameDialog = DuplicateAddSuffix
+        Case vbNo
+            ShowDuplicateNameDialog = DuplicateSkip
+        Case Else
+            ShowDuplicateNameDialog = DuplicateCancel
+    End Select
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ShowDuplicateNameDialog", Erl, False
+    End If
+    ShowDuplicateNameDialog = DuplicateCancel
+End Function
+
+' Показать диалог обработки некорректного имени
+Public Function ShowInvalidNameDialog(ByVal InvalidName As String, Optional ByVal ObjectType As String = "объект") As InvalidNameAction
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Warning "Обнаружено некорректное имя: " & InvalidName, MODULE_NAME
+        End If
+    End If
+    
+    ' Предложение пользователю выбрать действие
+    Dim msg As String
+    msg = "Имя " & ObjectType & " '" & InvalidName & "' содержит недопустимые символы." & vbCrLf & vbCrLf & _
+          "Выберите действие:" & vbCrLf & _
+          "- [Да] Автоматически удалить недопустимые символы" & vbCrLf & _
+          "- [Нет] Задать новое имя вручную" & vbCrLf & _
+          "- [Отмена] Отменить операцию"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNoCancel, "Некорректное имя")
+    
+    Select Case response
+        Case vbYes
+            ShowInvalidNameDialog = InvalidNameClean
+        Case vbNo
+            ShowInvalidNameDialog = InvalidNameRename
+        Case Else
+            ShowInvalidNameDialog = InvalidNameCancel
+    End Select
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ShowInvalidNameDialog", Erl, False
+    End If
+    ShowInvalidNameDialog = InvalidNameCancel
+End Function
+
+' Показать диалог ошибки доступа к файлу
+Public Function ShowFileAccessErrorDialog(ByVal FilePath As String, Optional ByVal Operation As String = "доступ к") As Boolean
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Error "Ошибка доступа к файлу: " & FilePath, MODULE_NAME
+        End If
+    End If
+    
+    ' Предложение пользователю выбрать действие
+    Dim msg As String
+    msg = "Ошибка при " & Operation & " файлу:" & vbCrLf & FilePath & vbCrLf & vbCrLf & _
+          "Возможные причины:" & vbCrLf & _
+          "- Файл не существует" & vbCrLf & _
+          "- Недостаточно прав доступа" & vbCrLf & _
+          "- Файл используется другим процессом" & vbCrLf & vbCrLf & _
+          "Продолжить выполнение операции?"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNo, "Ошибка доступа к файлу")
+    
+    ShowFileAccessErrorDialog = (response = vbYes)
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".ShowFileAccessErrorDialog", Erl, False
+    End If
+    ShowFileAccessErrorDialog = False
+End Function
+
+' Диалог ввода текста
+Public Function InputTextDialog(ByVal Prompt As String, Optional ByVal Title As String = "Ввод", _
+                               Optional ByVal DefaultValue As String = "") As String
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Запрос ввода текста: " & Prompt, MODULE_NAME
+        End If
+    End If
+    
+    Dim result As String
+    result = InputBox(Prompt, Title, DefaultValue)
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized And Len(result) > 0 Then
+            m_Logger.Log_Debug "Пользователь ввел текст (длина " & Len(result) & " символов)", MODULE_NAME
+        End If
+    End If
+    
+    InputTextDialog = result
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".InputTextDialog", Erl, False
+    End If
+    InputTextDialog = ""
+End Function
+
+' Показать диалог выбора каталога
+Public Function BrowseForFolder(Optional ByVal Title As String = "Выберите папку", _
+                               Optional ByVal InitialPath As String = "") As String
+    On Error GoTo ErrorHandler
+    
+    If Not m_Logger Is Nothing Then
+        If m_Logger.IsLoggerInitialized Then
+            m_Logger.Log_Info "Открытие диалога выбора каталога", MODULE_NAME
+        End If
+    End If
+    
+    #If VBA7 Then
+        Dim shellApp As Object
+        Dim folder As Object
+        
+        Set shellApp = CreateObject("Shell.Application")
+        Set folder = shellApp.BrowseForFolder(0, Title, 0, InitialPath)
+        
+        If Not folder Is Nothing Then
+            BrowseForFolder = folder.Self.Path
+            
+            If Not m_Logger Is Nothing Then
+                If m_Logger.IsLoggerInitialized Then
+                    m_Logger.Log_Debug "Выбран каталог: " & BrowseForFolder, MODULE_NAME
+                End If
+            End If
+        Else
+            BrowseForFolder = ""
+            
+            If Not m_Logger Is Nothing Then
+                If m_Logger.IsLoggerInitialized Then
+                    m_Logger.Log_Debug "Выбор каталога отменен", MODULE_NAME
+                End If
+            End If
+        End If
+    #Else
+        Dim folderPath As String
+        folderPath = InputBox("Введите путь к папке:", Title, InitialPath)
+        BrowseForFolder = folderPath
+        
+        If Not m_Logger Is Nothing Then
+            If m_Logger.IsLoggerInitialized Then
+                If Len(folderPath) > 0 Then
+                    m_Logger.Log_Debug "Указан каталог: " & folderPath, MODULE_NAME
+                Else
+                    m_Logger.Log_Debug "Ввод каталога отменен", MODULE_NAME
+                End If
+            End If
+        End If
+    #End If
+    
+    Exit Function
+    
+ErrorHandler:
+    If Not m_ErrorHandler Is Nothing Then
+        m_ErrorHandler.HandleError Err.Number, Err.Description, MODULE_NAME & ".BrowseForFolder", Erl, False
+    End If
+    BrowseForFolder = ""
+End Function
+
+' Освобождение ресурсов
+Private Sub Class_Terminate()
+    On Error Resume Next
+    Set m_Logger = Nothing
+    Set m_ErrorHandler = Nothing
+End Sub
+

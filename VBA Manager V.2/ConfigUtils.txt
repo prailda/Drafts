@@ -1,0 +1,208 @@
+Attribute VB_Name = "ConfigUtils"
+' Модуль ConfigUtils
+' Предоставляет вспомогательные функции для работы с конфигурационными файлами
+
+Option Explicit
+
+' Чтение значения из INI-файла
+Public Function ReadIniValue(ByVal IniPath As String, ByVal Section As String, _
+                           ByVal Key As String, ByVal DefaultValue As String) As String
+    On Error GoTo ErrorHandler
+    
+    ' Проверка существования файла
+    If Not FileExists(IniPath) Then
+        ReadIniValue = DefaultValue
+        Exit Function
+    End If
+    
+    Dim fileNum As Integer
+    Dim line As String
+    Dim currentSection As String
+    Dim parts() As String
+    
+    fileNum = FreeFile
+    
+    Open IniPath For Input As #fileNum
+    
+    currentSection = ""
+    
+    Do Until EOF(fileNum)
+        Line Input #fileNum, line
+        line = Trim(line)
+        
+        ' Пропускаем комментарии и пустые строки
+        If Left(line, 1) <> ";" And Len(line) > 0 Then
+            ' Проверка на секцию
+            If Left(line, 1) = "[" And Right(line, 1) = "]" Then
+                currentSection = Mid(line, 2, Len(line) - 2)
+            ' Проверка на пару ключ=значение
+            ElseIf InStr(line, "=") > 0 And currentSection = Section Then
+                parts = Split(line, "=", 2)
+                If UCase(Trim(parts(0))) = UCase(Key) Then
+                    ReadIniValue = Trim(parts(1))
+                    Close #fileNum
+                    Exit Function
+                End If
+            End If
+        End If
+    Loop
+    
+    Close #fileNum
+    
+    ' Если ключ не найден, возвращаем значение по умолчанию
+    ReadIniValue = DefaultValue
+    Exit Function
+    
+ErrorHandler:
+    ReadIniValue = DefaultValue
+    Resume Next
+End Function
+
+' Запись значения в INI-файл
+Public Function WriteIniValue(ByVal IniPath As String, ByVal Section As String, _
+                            ByVal Key As String, ByVal Value As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверка параметров
+    If Len(Trim(IniPath)) = 0 Or Len(Trim(Section)) = 0 Or Len(Trim(Key)) = 0 Then
+        WriteIniValue = False
+        Exit Function
+    End If
+    
+    ' Чтение текущего содержимого файла, если он существует
+    Dim fileContent As String
+    Dim newContent As String
+    Dim lines() As String
+    Dim i As Long
+    Dim inSection As Boolean
+    Dim keyFound As Boolean
+    
+    inSection = False
+    keyFound = False
+    
+    ' Если файл существует, читаем его содержимое
+    If FileExists(IniPath) Then
+        fileContent = ReadTextFile(IniPath)
+        lines = Split(fileContent, vbCrLf)
+        
+        ' Обработка существующего содержимого
+        For i = LBound(lines) To UBound(lines)
+            Dim line As String
+            line = lines(i)
+            
+            ' Проверяем, находимся ли в нужной секции
+            If Trim(line) <> "" Then
+                ' Начало секции
+                If Left(Trim(line), 1) = "[" And Right(Trim(line), 1) = "]" Then
+                    Dim sectionName As String
+                    sectionName = Mid(Trim(line), 2, Len(Trim(line)) - 2)
+                    
+                    ' Если мы были в нужной секции и не нашли ключ, добавляем его
+                    If inSection And Not keyFound Then
+                        newContent = newContent & Key & "=" & Value & vbCrLf
+                        keyFound = True
+                    End If
+                    
+                    ' Устанавливаем флаг текущей секции
+                    inSection = (sectionName = Section)
+                    
+                    ' Добавляем строку с новой секцией
+                    newContent = newContent & line & vbCrLf
+                ' Пара ключ=значение
+                ElseIf InStr(line, "=") > 0 And inSection Then
+                    Dim parts() As String
+                    parts = Split(line, "=", 2)
+                    
+                    ' Если нашли нужный ключ, заменяем его значение
+                    If UCase(Trim(parts(0))) = UCase(Key) Then
+                        newContent = newContent & Key & "=" & Value & vbCrLf
+                        keyFound = True
+                    Else
+                        newContent = newContent & line & vbCrLf
+                    End If
+                Else
+                    ' Любые другие строки добавляем как есть
+                    newContent = newContent & line & vbCrLf
+                End If
+            Else
+                ' Пустые строки добавляем как есть
+                newContent = newContent & line & vbCrLf
+            End If
+        Next i
+        
+        ' Если секция не найдена, добавляем её
+        If Not inSection Then
+            newContent = newContent & vbCrLf & "[" & Section & "]" & vbCrLf
+            newContent = newContent & Key & "=" & Value & vbCrLf
+        ' Если секция найдена, но ключ не найден, добавляем его
+        ElseIf Not keyFound Then
+            newContent = newContent & Key & "=" & Value & vbCrLf
+        End If
+    Else
+        ' Создаем новый файл с указанными данными
+        newContent = "[" & Section & "]" & vbCrLf
+        newContent = newContent & Key & "=" & Value & vbCrLf
+    End If
+    
+    ' Запись результата в файл
+    WriteIniValue = WriteTextFile(IniPath, newContent, False)
+    Exit Function
+    
+ErrorHandler:
+    WriteIniValue = False
+    Resume Next
+End Function
+
+' Функция для преобразования строки в логический тип
+Public Function StringToBool(ByVal strValue As String, Optional ByVal DefaultValue As Boolean = False) As Boolean
+    On Error Resume Next
+    
+    Select Case UCase(strValue)
+        Case "TRUE", "YES", "1", "ON"
+            StringToBool = True
+        Case "FALSE", "NO", "0", "OFF"
+            StringToBool = False
+        Case Else
+            StringToBool = DefaultValue
+    End Select
+End Function
+
+' Функция для проверки существования секции в INI-файле
+Public Function SectionExists(ByVal IniPath As String, ByVal Section As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    If Not FileExists(IniPath) Then
+        SectionExists = False
+        Exit Function
+    End If
+    
+    Dim fileNum As Integer
+    Dim line As String
+    
+    fileNum = FreeFile
+    
+    Open IniPath For Input As #fileNum
+    
+    Do Until EOF(fileNum)
+        Line Input #fileNum, line
+        line = Trim(line)
+        
+        ' Проверка секции
+        If Left(line, 1) = "[" And Right(line, 1) = "]" Then
+            If Mid(line, 2, Len(line) - 2) = Section Then
+                Close #fileNum
+                SectionExists = True
+                Exit Function
+            End If
+        End If
+    Loop
+    
+    Close #fileNum
+    SectionExists = False
+    Exit Function
+    
+ErrorHandler:
+    SectionExists = False
+    Resume Next
+End Function
+
