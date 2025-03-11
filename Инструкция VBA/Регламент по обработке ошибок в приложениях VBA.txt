@@ -1,0 +1,1051 @@
+#РЕГЛАМЕНТ ПО ОБРАБОТКЕ ОШИБОК В VBA-ПРИЛОЖЕНИЯХ
+
+1. Объектно-ориентированная обработка ошибок
+
+Обработка ошибок является критически важным компонентом любого профессионального VBA-приложения. Ниже представлена комплексная система обработки ошибок, основанная на объектно-ориентированном подходе и передовых практиках, описанных в Guidelines.
+
+1.1 Класс ErrorHandler
+
+Центральным элементом системы обработки ошибок является специализированный класс ErrorHandler:
+
+' Класс ErrorHandler
+' Централизованный механизм обработки ошибок
+Option Explicit
+
+' Состояние обработчика ошибок
+Private Type TErrorHandlerState
+    Logger As Logger                ' Ссылка на систему логирования
+    ShowErrors As Boolean           ' Показывать ли ошибки пользователю
+    LogErrors As Boolean            ' Логировать ли ошибки
+    DetailedErrorInfo As Boolean    ' Включать ли детальную информацию
+    LastError As Long               ' Последний код ошибки
+    LastErrorDescription As String  ' Описание последней ошибки
+    LastErrorSource As String       ' Источник последней ошибки
+    LastErrorLine As Long           ' Строка последней ошибки
+End Type
+
+Private This As TErrorHandlerState
+
+' Инициализация объекта
+Private Sub Class_Initialize()
+    ' Настройки по умолчанию
+    This.ShowErrors = True
+    This.LogErrors = True
+    This.DetailedErrorInfo = True
+    
+    ' Получаем экземпляр логгера
+    Set This.Logger = GetLogger()
+End Sub
+
+' Основной метод обработки ошибок
+Public Function HandleError(ByVal ErrorNumber As Long, ByVal ErrorDescription As String, _
+                           ByVal Source As String, ByVal LineNumber As Long, _
+                           Optional ByVal ShowUser As Boolean = True, _
+                           Optional ByVal AdditionalInfo As String = "") As Boolean
+    
+    ' Сохраняем информацию о последней ошибке
+    This.LastError = ErrorNumber
+    This.LastErrorDescription = ErrorDescription
+    This.LastErrorSource = Source
+    This.LastErrorLine = LineNumber
+    
+    ' Формируем детальное сообщение
+    Dim errorMsg As String
+    errorMsg = BuildErrorMessage(ErrorNumber, ErrorDescription, Source, LineNumber, AdditionalInfo)
+    
+    ' Логирование ошибки
+    If This.LogErrors Then
+        If Not This.Logger Is Nothing Then
+            If This.Logger.IsLoggerInitialized Then
+                This.Logger.Log_Error errorMsg, Source
+            End If
+        End If
+    End If
+    
+    ' Отображение ошибки пользователю
+    If This.ShowErrors And ShowUser Then
+        Dim uiMsg As String
+        uiMsg = BuildUserErrorMessage(ErrorNumber, ErrorDescription, Source)
+        MsgBox uiMsg, vbExclamation, "Ошибка приложения"
+    End If
+    
+    HandleError = True  ' Сигнал об успешной обработке ошибки
+End Function
+
+' Формирование детального сообщения об ошибке
+Private Function BuildErrorMessage(ByVal ErrorNumber As Long, ByVal ErrorDescription As String, _
+                                  ByVal Source As String, ByVal LineNumber As Long, _
+                                  Optional ByVal AdditionalInfo As String = "") As String
+    Dim result As String
+    
+    result = "Ошибка #" & ErrorNumber & ": " & ErrorDescription
+    
+    If Len(Source) > 0 Then
+        result = result & vbCrLf & "В модуле: " & Source
+    End If
+    
+    If LineNumber > 0 Then
+        result = result & ", строка: " & LineNumber
+    End If
+    
+    If Len(AdditionalInfo) > 0 Then
+        result = result & vbCrLf & "Дополнительная информация: " & AdditionalInfo
+    End If
+    
+    If This.DetailedErrorInfo Then
+        result = result & vbCrLf & _
+                "Время: " & Now & vbCrLf & _
+                "Пользователь: " & Environ("USERNAME") & vbCrLf & _
+                "Компьютер: " & Environ("COMPUTERNAME")
+    End If
+    
+    BuildErrorMessage = result
+End Function
+
+' Формирование сообщения для пользователя (более краткого)
+Private Function BuildUserErrorMessage(ByVal ErrorNumber As Long, ByVal ErrorDescription As String, _
+                                     ByVal Source As String) As String
+    Dim result As String
+    
+    ' Для пользователя формируем более понятное и краткое сообщение
+    result = "Произошла ошибка при выполнении операции." & vbCrLf & vbCrLf
+    result = result & "Описание: " & ErrorDescription
+    
+    ' Только если это режим отладки или специально разрешено, добавляем технические детали
+    #If DebugMode Then
+        result = result & vbCrLf & vbCrLf & "Технические детали:" & vbCrLf
+        result = result & "Код ошибки: " & ErrorNumber & vbCrLf
+        If Len(Source) > 0 Then
+            result = result & "Модуль: " & Source
+        End If
+    #End If
+    
+    BuildUserErrorMessage = result
+End Function
+
+' Методы настройки поведения
+Public Sub Configure(Optional ByVal ShowErrors As Variant, Optional ByVal LogErrors As Variant, _
+                   Optional ByVal DetailedErrorInfo As Variant)
+    If Not IsMissing(ShowErrors) Then This.ShowErrors = CBool(ShowErrors)
+    If Not IsMissing(LogErrors) Then This.LogErrors = CBool(LogErrors)
+    If Not IsMissing(DetailedErrorInfo) Then This.DetailedErrorInfo = CBool(DetailedErrorInfo)
+    
+    If This.LogErrors Then
+        ' Логируем изменение настроек
+        If Not This.Logger Is Nothing Then
+            If This.Logger.IsLoggerInitialized Then
+                This.Logger.Log_Info "Настройка ErrorHandler изменена: ShowErrors=" & _
+                                    This.ShowErrors & ", LogErrors=" & This.LogErrors & _
+                                    ", DetailedErrorInfo=" & This.DetailedErrorInfo, _
+                                    "ErrorHandler.Configure"
+            End If
+        End If
+    End If
+End Sub
+
+' Свойства для доступа к настройкам
+Public Property Get ShowErrors() As Boolean
+    ShowErrors = This.ShowErrors
+End Property
+
+Public Property Let ShowErrors(ByVal Value As Boolean)
+    This.ShowErrors = Value
+End Property
+
+Public Property Get LogErrors() As Boolean
+    LogErrors = This.LogErrors
+End Property
+
+Public Property Let LogErrors(ByVal Value As Boolean)
+    This.LogErrors = Value
+End Property
+
+Public Property Get DetailedErrorInfo() As Boolean
+    DetailedErrorInfo = This.DetailedErrorInfo
+End Property
+
+Public Property Let DetailedErrorInfo(ByVal Value As Boolean)
+    This.DetailedErrorInfo = Value
+End Property
+
+1.2 Специализированные обработчики типовых ошибок
+
+Расширим класс ErrorHandler методами для обработки типичных ошибок в VBA:
+
+' Обработка ошибки доступа к файлу
+Public Function HandleFileAccessError(ByVal FilePath As String, _
+                                    ByVal Source As String, _
+                                    Optional ByVal Operation As String = "доступ к") As Boolean
+    ' Формируем специфичное сообщение для ошибки доступа к файлу
+    Dim errorMsg As String
+    errorMsg = "Ошибка при " & Operation & " файлу: " & FilePath
+    
+    ' Логируем ошибку
+    If This.LogErrors Then
+        If Not This.Logger Is Nothing Then
+            If This.Logger.IsLoggerInitialized Then
+                This.Logger.Log_Error errorMsg, Source
+            End If
+        End If
+    End If
+    
+    ' Отображаем пользователю специализированное сообщение с возможностью продолжить или отменить
+    If This.ShowErrors Then
+        Dim promptMsg As String
+        promptMsg = "Ошибка при " & Operation & " файлу:" & vbCrLf & _
+                   FilePath & vbCrLf & vbCrLf & _
+                   "Возможные причины:" & vbCrLf & _
+                   "- Файл не существует" & vbCrLf & _
+                   "- Недостаточно прав доступа" & vbCrLf & _
+                   "- Файл используется другим процессом" & vbCrLf & vbCrLf & _
+                   "Продолжить выполнение операции?"
+        
+        Dim response As VbMsgBoxResult
+        response = MsgBox(promptMsg, vbQuestion + vbYesNo, "Ошибка доступа к файлу")
+        
+        ' Возвращаем результат диалога (True, если пользователь решил продолжить)
+        HandleFileAccessError = (response = vbYes)
+    Else
+        ' Если не показываем ошибки, просто возвращаем False
+        HandleFileAccessError = False
+    End If
+End Function
+
+' Обработка ошибки "Объект с таким именем уже существует"
+Public Function HandleDuplicateNameError(ByVal ObjectName As String, _
+                                       ByVal Source As String, _
+                                       Optional ByVal ObjectType As String = "объект") As DuplicateNameAction
+    ' Логируем ошибку
+    If This.LogErrors Then
+        If Not This.Logger Is Nothing Then
+            If This.Logger.IsLoggerInitialized Then
+                This.Logger.Log_Warning "Объект с именем '" & ObjectName & "' уже существует", Source
+            End If
+        End If
+    End If
+    
+    ' Если не показываем ошибки, возвращаем действие по умолчанию
+    If Not This.ShowErrors Then
+        HandleDuplicateNameError = DuplicateAddSuffix
+        Exit Function
+    End If
+    
+    ' Предлагаем пользователю выбрать действие
+    Dim msg As String
+    msg = ObjectType & " с именем '" & ObjectName & "' уже существует." & vbCrLf & vbCrLf & _
+          "Выберите действие:" & vbCrLf & _
+          "- [Да] Добавить суффикс к имени" & vbCrLf & _
+          "- [Нет] Пропустить этот объект" & vbCrLf & _
+          "- [Отмена] Отменить операцию"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNoCancel, "Дублирование имени")
+    
+    ' Определяем действие на основе ответа пользователя
+    Select Case response
+        Case vbYes
+            HandleDuplicateNameError = DuplicateAddSuffix
+        Case vbNo
+            HandleDuplicateNameError = DuplicateSkip
+        Case Else
+            HandleDuplicateNameError = DuplicateCancel
+    End Select
+End Function
+
+' Обработка ошибки "Имя некорректно"
+Public Function HandleInvalidNameError(ByVal InvalidName As String, _
+                                     ByVal Source As String, _
+                                     Optional ByVal ObjectType As String = "объект") As InvalidNameAction
+    ' Логируем ошибку
+    If This.LogErrors Then
+        If Not This.Logger Is Nothing Then
+            If This.Logger.IsLoggerInitialized Then
+                This.Logger.Log_Warning "Некорректное имя '" & InvalidName & "' содержит недопустимые символы", Source
+            End If
+        End If
+    End If
+    
+    ' Если не показываем ошибки, возвращаем действие по умолчанию
+    If Not This.ShowErrors Then
+        HandleInvalidNameError = InvalidNameClean
+        Exit Function
+    End If
+    
+    ' Предлагаем пользователю выбрать действие
+    Dim msg As String
+    msg = "Имя " & ObjectType & " '" & InvalidName & "' содержит недопустимые символы." & vbCrLf & vbCrLf & _
+          "Выберите действие:" & vbCrLf & _
+          "- [Да] Автоматически удалить недопустимые символы" & vbCrLf & _
+          "- [Нет] Задать новое имя вручную" & vbCrLf & _
+          "- [Отмена] Отменить операцию"
+    
+    Dim response As VbMsgBoxResult
+    response = MsgBox(msg, vbQuestion + vbYesNoCancel, "Некорректное имя")
+    
+    ' Определяем действие на основе ответа пользователя
+    Select Case response
+        Case vbYes
+            HandleInvalidNameError = InvalidNameClean
+        Case vbNo
+            HandleInvalidNameError = InvalidNameRename
+        Case Else
+            HandleInvalidNameError = InvalidNameCancel
+    End Select
+End Function
+
+2. Структурирование обработчиков ошибок
+
+2.1 Стандартный шаблон обработки ошибок
+
+Четкое разделение "счастливого пути" и кода обработки ошибок:
+
+Public Function ProcessData(ByVal InputData As Variant) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' ============ НАЧАЛО ОСНОВНОГО КОДА ("СЧАСТЛИВЫЙ ПУТЬ") ============
+    
+    ' Проверка входных данных (защитные условия)
+    If InputData Is Nothing Then
+        ' Явное создание ошибки с определенным кодом
+        Err.Raise ERR_INVALID_INPUT, "ProcessData", "Входные данные не могут быть Nothing"
+    End If
+    
+    ' Основная логика функции
+    Dim result As Boolean
+    result = InternalProcessingLogic(InputData)
+    
+    ' Успешное завершение функции
+    ProcessData = result
+    
+    ' ============ КОНЕЦ ОСНОВНОГО КОДА ============
+    
+    ' Обязательный выход из функции перед обработчиком ошибок
+    Exit Function
+    
+ErrorHandler:
+    ' Централизованная обработка ошибки
+    GetErrorHandler.HandleError Err.Number, Err.Description, "ModuleName.ProcessData", Erl
+    
+    ' Возвращаем значение ошибки (False для функций типа Boolean)
+    ProcessData = False
+    
+    ' Явное возобновление выполнения в точке очистки
+    Resume CleanExit
+    
+CleanExit:
+    ' Код очистки, который должен выполняться независимо от наличия ошибки
+    ' (закрытие файлов, освобождение ресурсов и т.д.)
+    If Not InputData Is Nothing Then
+        ' Освобождение ресурсов...
+    End If
+End Function
+
+2.2 Обработка ошибок с расширенной диагностикой
+
+Public Function ImportData(ByVal FilePath As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Для расширенной диагностики используем нумерацию строк
+10  ' Объявление переменных
+    Dim FileNum As Integer
+    Dim RecordCount As Long
+    Dim Success As Boolean
+    
+20  ' Проверка существования файла
+    If Len(Dir(FilePath)) = 0 Then
+        Err.Raise ERR_FILE_NOT_FOUND, "ImportData", "Файл не найден: " & FilePath
+    End If
+    
+30  ' Открытие файла
+    FileNum = FreeFile
+    Open FilePath For Input As #FileNum
+    
+40  ' Чтение данных
+    RecordCount = 0
+    
+    ' Построчная обработка файла
+    Do Until EOF(FileNum)
+        ' Обработка строки...
+        RecordCount = RecordCount + 1
+    Loop
+    
+50  ' Закрытие файла
+    Close #FileNum
+    
+60  ' Успешное завершение
+    ImportData = True
+    
+    Exit Function
+    
+ErrorHandler:
+    ' Детальный анализ ошибки по номеру строки
+    Dim LineInfo As String
+    LineInfo = "строка " & Erl
+    
+    ' Контекстно-зависимые действия в зависимости от места возникновения ошибки
+    Select Case Erl
+        Case 20  ' Ошибка при проверке существования файла
+            GetErrorHandler.HandleFileAccessError FilePath, "ModuleName.ImportData", "проверку наличия"
+            
+        Case 30  ' Ошибка при открытии файла
+            GetErrorHandler.HandleFileAccessError FilePath, "ModuleName.ImportData", "открытие"
+            
+        Case 40, 50  ' Ошибка при чтении данных или закрытии файла
+            ' Общая обработка ошибки
+            GetErrorHandler.HandleError Err.Number, Err.Description, "ModuleName.ImportData", Erl, _
+                      "Количество успешно прочитанных записей: " & RecordCount
+            
+            ' Попытка закрыть файл, если он был открыт
+            On Error Resume Next
+            Close #FileNum
+            On Error GoTo ErrorHandler
+            
+        Case Else
+            ' Общая обработка для других ошибок
+            GetErrorHandler.HandleError Err.Number, Err.Description, "ModuleName.ImportData", Erl
+    End Select
+    
+    ImportData = False
+    Resume CleanExit
+    
+CleanExit:
+    ' Убеждаемся, что файл закрыт
+    On Error Resume Next
+    Close #FileNum
+End Function
+
+3. Типизированные ошибки и константы ошибок
+
+3.1 Модуль с константами ошибок
+
+' Модуль ErrorConstants
+' Содержит определения констант для типов ошибок
+Option Explicit
+
+' Базовые значения для категорий ошибок (удобно для группировки)
+Public Const ERR_BASE_VALIDATION As Long = 10000   ' Ошибки валидации
+Public Const ERR_BASE_FILE As Long = 20000         ' Ошибки файловой системы
+Public Const ERR_BASE_DATA As Long = 30000         ' Ошибки данных
+Public Const ERR_BASE_UI As Long = 40000           ' Ошибки интерфейса
+Public Const ERR_BASE_SYSTEM As Long = 50000       ' Системные ошибки
+
+' Ошибки валидации входных данных
+Public Const ERR_INVALID_INPUT As Long = ERR_BASE_VALIDATION + 1        ' Некорректные входные данные
+Public Const ERR_INVALID_FORMAT As Long = ERR_BASE_VALIDATION + 2       ' Некорректный формат данных
+Public Const ERR_INVALID_RANGE As Long = ERR_BASE_VALIDATION + 3        ' Значение вне допустимого диапазона
+Public Const ERR_INVALID_TYPE As Long = ERR_BASE_VALIDATION + 4         ' Некорректный тип данных
+
+' Ошибки файловой системы
+Public Const ERR_FILE_NOT_FOUND As Long = ERR_BASE_FILE + 1             ' Файл не найден
+Public Const ERR_DIRECTORY_NOT_FOUND As Long = ERR_BASE_FILE + 2        ' Директория не найдена
+Public Const ERR_FILE_ACCESS_DENIED As Long = ERR_BASE_FILE + 3         ' Доступ к файлу запрещен
+Public Const ERR_FILE_ALREADY_EXISTS As Long = ERR_BASE_FILE + 4        ' Файл уже существует
+Public Const ERR_FILE_CORRUPTED As Long = ERR_BASE_FILE + 5             ' Файл поврежден
+
+' Ошибки данных
+Public Const ERR_DATA_NOT_FOUND As Long = ERR_BASE_DATA + 1             ' Данные не найдены
+Public Const ERR_DATA_ALREADY_EXISTS As Long = ERR_BASE_DATA + 2        ' Данные уже существуют
+Public Const ERR_DATA_INTEGRITY As Long = ERR_BASE_DATA + 3             ' Нарушение целостности данных
+Public Const ERR_DATA_CONVERSION As Long = ERR_BASE_DATA + 4            ' Ошибка преобразования данных
+
+' Ошибки пользовательского интерфейса
+Public Const ERR_UI_ELEMENT_NOT_FOUND As Long = ERR_BASE_UI + 1         ' Элемент интерфейса не найден
+Public Const ERR_UI_INVALID_STATE As Long = ERR_BASE_UI + 2             ' Недопустимое состояние интерфейса
+
+' Системные ошибки
+Public Const ERR_SYSTEM_MEMORY As Long = ERR_BASE_SYSTEM + 1            ' Недостаточно памяти
+Public Const ERR_SYSTEM_TIMEOUT As Long = ERR_BASE_SYSTEM + 2           ' Таймаут операции
+Public Const ERR_SYSTEM_UNEXPECTED As Long = ERR_BASE_SYSTEM + 3        ' Непредвиденная системная ошибка
+
+3.2 Использование типизированных ошибок
+
+Public Function ValidateCustomerData(ByVal CustomerData As CustomerData) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверка входных данных
+    If CustomerData Is Nothing Then
+        Err.Raise ERR_INVALID_INPUT, "ValidateCustomerData", "Данные клиента не могут быть Nothing"
+    End If
+    
+    ' Проверка обязательных полей
+    If Len(Trim(CustomerData.CustomerID)) = 0 Then
+        Err.Raise ERR_INVALID_INPUT, "ValidateCustomerData", "ID клиента является обязательным полем"
+    End If
+    
+    ' Проверка формата email
+    If Len(Trim(CustomerData.Email)) > 0 Then
+        If Not IsValidEmail(CustomerData.Email) Then
+            Err.Raise ERR_INVALID_FORMAT, "ValidateCustomerData", _
+                     "Некорректный формат email: " & CustomerData.Email
+        End If
+    End If
+    
+    ' Проверка диапазона значений
+    If CustomerData.CreditLimit < 0 Or CustomerData.CreditLimit > 1000000 Then
+        Err.Raise ERR_INVALID_RANGE, "ValidateCustomerData", _
+                 "Кредитный лимит должен быть в диапазоне от 0 до 1000000"
+    End If
+    
+    ' Успешное завершение
+    ValidateCustomerData = True
+    Exit Function
+    
+ErrorHandler:
+    ' Обработка ошибки в зависимости от ее типа
+    Select Case Err.Number
+        Case ERR_INVALID_INPUT, ERR_INVALID_FORMAT, ERR_INVALID_RANGE
+            ' Это ожидаемые ошибки валидации, логируем их как предупреждения
+            GetLogger.Log_Warning Err.Description, "ValidateCustomerData"
+            
+        Case Else
+            ' Прочие ошибки - обрабатываем стандартно
+            GetErrorHandler.HandleError Err.Number, Err.Description, "ModuleName.ValidateCustomerData", Erl
+    End Select
+    
+    ValidateCustomerData = False
+    Resume CleanExit
+    
+CleanExit:
+    ' Код очистки, если необходим
+End Function
+
+4. Многоуровневая обработка ошибок
+
+4.1 Модель многоуровневой обработки для сложных приложений
+
+' Уровень 1: Низкоуровневые операции (доступ к данным)
+Private Function ReadCustomerFromDatabase(ByVal CustomerID As String) As CustomerData
+    On Error GoTo ErrorHandler
+    
+    ' Код чтения данных из базы...
+    
+    Exit Function
+    
+ErrorHandler:
+    ' Низкоуровневая обработка с преобразованием в типизированные ошибки приложения
+    Select Case Err.Number
+        Case 3021 ' Специфический код ошибки ADO "No records found"
+            ' Преобразуем в нашу типизированную ошибку
+            Err.Raise ERR_DATA_NOT_FOUND, "ReadCustomerFromDatabase", _
+                     "Клиент с ID " & CustomerID & " не найден в базе данных"
+            
+        Case 3078 ' Специфический код ошибки ADO "Connection timeout"
+            ' Преобразуем в нашу типизированную ошибку
+            Err.Raise ERR_SYSTEM_TIMEOUT, "ReadCustomerFromDatabase", _
+                     "Таймаут подключения к базе данных при поиске клиента " & CustomerID
+            
+        Case Else
+            ' Прочие ошибки пробрасываем выше
+            Err.Raise Err.Number, "ReadCustomerFromDatabase", Err.Description
+    End Select
+End Function
+
+' Уровень 2: Бизнес-логика
+Public Function GetCustomerData(ByVal CustomerID As String) As CustomerData
+    On Error GoTo ErrorHandler
+    
+    ' Валидация входных данных
+    If Len(Trim(CustomerID)) = 0 Then
+        Err.Raise ERR_INVALID_INPUT, "GetCustomerData", "ID клиента не может быть пустым"
+    End If
+    
+    ' Вызов низкоуровневой функции
+    Dim Customer As CustomerData
+    Set Customer = ReadCustomerFromDatabase(CustomerID)
+    
+    ' Дополнительная бизнес-логика...
+    
+    ' Возвращаем результат
+    Set GetCustomerData = Customer
+    Exit Function
+    
+ErrorHandler:
+    ' Обработка на уровне бизнес-логики
+    Select Case Err.Number
+        Case ERR_DATA_NOT_FOUND
+            ' Мы знаем, что делать, если клиент не найден
+            GetLogger.Log_Warning "Клиент не найден: " & CustomerID, "GetCustomerData"
+            Set GetCustomerData = Nothing
+            Resume CleanExit ' Продолжаем выполнение с точки очистки
+            
+        Case ERR_INVALID_INPUT
+            ' Обрабатываем ошибку валидации
+            GetLogger.Log_Warning Err.Description, "GetCustomerData"
+            Set GetCustomerData = Nothing
+            Resume CleanExit
+            
+        Case Else
+            ' Прочие ошибки: логируем и пробрасываем выше
+            GetLogger.Log_Error "Ошибка при получении данных клиента: " & Err.Description, "GetCustomerData"
+            Err.Raise Err.Number, "GetCustomerData", Err.Description
+    End Select
+    
+CleanExit:
+    ' Код очистки ресурсов
+End Function
+
+' Уровень 3: Пользовательский интерфейс
+Public Sub DisplayCustomerInfo(ByVal CustomerID As String)
+    On Error GoTo ErrorHandler
+    
+    ' Попытка получить данные клиента
+    Dim Customer As CustomerData
+    Set Customer = GetCustomerData(CustomerID)
+    
+    ' Проверка результата
+    If Customer Is Nothing Then
+        MsgBox "Информация о клиенте недоступна.", vbInformation, "Нет данных"
+        Exit Sub
+    End If
+    
+    ' Отображение информации
+    DisplayCustomerForm Customer
+    Exit Sub
+    
+ErrorHandler:
+    ' Интерфейсный уровень: преобразование технических ошибок в понятные пользователю сообщения
+    Select Case Err.Number
+        Case ERR_SYSTEM_TIMEOUT
+            MsgBox "Не удалось получить информацию о клиенте из-за проблем с подключением к базе данных. " & _
+                   "Пожалуйста, попробуйте позже.", vbExclamation, "Проблема с подключением"
+                   
+        Case ERR_DATA_INTEGRITY
+            MsgBox "Обнаружена проблема с данными клиента. Пожалуйста, обратитесь в службу поддержки.", _
+                   vbExclamation, "Ошибка данных"
+                   
+        Case Else
+            ' Для прочих ошибок используем общий обработчик
+            GetErrorHandler.HandleError Err.Number, Err.Description, "UI.DisplayCustomerInfo", Erl, True
+    End Select
+    
+    Resume CleanExit
+    
+CleanExit:
+    ' Код очистки интерфейса
+End Sub
+
+4.2 Стратегия "повторить с задержкой" для сетевых операций
+
+' Функция с автоматической повторной попыткой для сетевых операций
+Public Function DownloadDataWithRetry(ByVal URL As String, _
+                                    Optional ByVal MaxRetries As Integer = 3, _
+                                    Optional ByVal RetryDelayMS As Long = 1000) As String
+    On Error GoTo ErrorHandler
+    
+    Dim RetryCount As Integer
+    Dim Response As String
+    
+    ' Попытка загрузки с повторами
+    For RetryCount = 0 To MaxRetries
+        If RetryCount > 0 Then
+            ' Логирование повторной попытки
+            GetLogger.Log_Warning "Повторная попытка " & RetryCount & " из " & MaxRetries & _
+                               " для загрузки: " & URL, "DownloadDataWithRetry"
+            
+            ' Пауза перед повтором
+            Application.Wait Now + TimeValue("00:00:0" & (RetryDelayMS / 1000))
+        End If
+        
+        ' Попытка загрузки
+        On Error Resume Next
+        Response = HttpGet(URL)
+        
+        ' Проверка результата
+        If Err.Number = 0 And Len(Response) > 0 Then
+            ' Успешная загрузка
+            DownloadDataWithRetry = Response
+            Exit Function
+        End If
+        
+        ' Сохраняем информацию об ошибке для последующего анализа
+        Dim LastError As Long, LastErrorDesc As String
+        LastError = Err.Number
+        LastErrorDesc = Err.Description
+        Err.Clear
+        On Error GoTo ErrorHandler
+    Next RetryCount
+    
+    ' Если все попытки завершились неудачно, генерируем ошибку
+    Err.Raise ERR_SYSTEM_TIMEOUT, "DownloadDataWithRetry", _
+             "Не удалось загрузить данные после " & MaxRetries & " попыток. " & _
+             "Последняя ошибка: " & LastError & " - " & LastErrorDesc
+    
+    Exit Function
+    
+ErrorHandler:
+    ' Обработка ошибок, не связанных с загрузкой
+    GetErrorHandler.HandleError Err.Number, Err.Description, "NetworkUtils.DownloadDataWithRetry", Erl
+    DownloadDataWithRetry = ""
+End Function
+
+5. Интеграция с механизмами валидации
+
+5.1 Система проверки с генерацией ошибок
+
+' Класс Validator для проверки данных с генерацией ошибок
+Option Explicit
+
+' Проверка на Nothing или NULL
+Public Sub NotNullOrNothing(ByVal Value As Variant, _
+                           ByVal ParamName As String, _
+                           Optional ByVal Source As String = "")
+    If IsObject(Value) Then
+        If Value Is Nothing Then
+            RaiseValidationError "Параметр '" & ParamName & "' не может быть Nothing", ParamName, Source
+        End If
+    Else
+        If IsNull(Value) Then
+            RaiseValidationError "Параметр '" & ParamName & "' не может быть NULL", ParamName, Source
+        End If
+    End If
+End Sub
+
+' Проверка строки на пустоту
+Public Sub NotNullOrEmpty(ByVal Text As String, _
+                         ByVal ParamName As String, _
+                         Optional ByVal Source As String = "")
+    If Len(Trim(Text)) = 0 Then
+        RaiseValidationError "Параметр '" & ParamName & "' не может быть пустым", ParamName, Source
+    End If
+End Sub
+
+' Проверка числа на диапазон
+Public Sub InRange(ByVal Value As Double, _
+                  ByVal MinValue As Double, _
+                  ByVal MaxValue As Double, _
+                  ByVal ParamName As String, _
+                  Optional ByVal Source As String = "")
+    If Value < MinValue Or Value > MaxValue Then
+        RaiseValidationError "Параметр '" & ParamName & "' должен быть в диапазоне от " & _
+                           MinValue & " до " & MaxValue, ParamName, Source
+    End If
+End Sub
+
+' Проверка объекта на тип
+Public Sub IsOfType(ByVal Obj As Object, _
+                   ByVal ExpectedTypeName As String, _
+                   ByVal ParamName As String, _
+                   Optional ByVal Source As String = "")
+    If TypeName(Obj) <> ExpectedTypeName Then
+        RaiseValidationError "Параметр '" & ParamName & "' должен быть типа " & ExpectedTypeName & _
+                           ", получен " & TypeName(Obj), ParamName, Source
+    End If
+End Sub
+
+' Вспомогательный метод для генерации ошибки валидации
+Private Sub RaiseValidationError(ByVal Message As String, _
+                               ByVal ParamName As String, _
+                               ByVal Source As String)
+    Dim FullSource As String
+    FullSource = IIf(Len(Source) > 0, Source & "." & ParamName, ParamName)
+    
+    Err.Raise ERR_INVALID_INPUT, FullSource, Message
+End Sub
+
+5.2 Использование системы валидации в коде
+
+Public Function ProcessCustomerOrder(ByVal Customer As CustomerData, _
+                                    ByVal OrderItems As Collection, _
+                                    ByVal PaymentMethod As String) As Boolean
+    On Error GoTo ErrorHandler
+    
+    Dim Validator As New Validator
+    
+    ' Валидация входных данных
+    Validator.NotNullOrNothing Customer, "Customer", "ProcessCustomerOrder"
+    Validator.NotNullOrNothing OrderItems, "OrderItems", "ProcessCustomerOrder"
+    Validator.NotNullOrEmpty PaymentMethod, "PaymentMethod", "ProcessCustomerOrder"
+    
+    ' Дополнительные проверки
+    If OrderItems.Count = 0 Then
+        Validator.RaiseValidationError "Заказ должен содержать хотя бы один товар", _
+                                     "OrderItems", "ProcessCustomerOrder"
+    End If
+    
+    ' Основная логика обработки заказа...
+    
+    ProcessCustomerOrder = True
+    Exit Function
+    
+ErrorHandler:
+    ' Обработка ошибок валидации
+    If Err.Number = ERR_INVALID_INPUT Then
+        ' Логируем ошибку валидации
+        GetLogger.Log_Warning Err.Description, Err.Source
+        
+        ' Информируем пользователя
+        MsgBox "Ошибка в данных заказа: " & Err.Description, vbExclamation, "Некорректные данные"
+    Else
+        ' Другие ошибки
+        GetErrorHandler.HandleError Err.Number, Err.Description, "OrderProcessor.ProcessCustomerOrder", Erl
+    End If
+    
+    ProcessCustomerOrder = False
+    Resume CleanExit
+    
+CleanExit:
+    ' Код очистки
+End Function
+
+6. Практические рекомендации
+
+6.1 Создание детального лога ошибок
+
+' Расширенное логирование для отладки сложных ошибок
+Public Sub LogExtendedErrorInfo(ByVal ErrorNumber As Long, _
+                              ByVal ErrorDescription As String, _
+                              ByVal Source As String, _
+                              ByVal LineNumber As Long, _
+                              Optional ByVal VariablesState As Dictionary = Nothing)
+    
+    Dim Logger As Logger
+    Set Logger = GetLogger()
+    
+    ' Базовая информация об ошибке
+    Dim LogMessage As String
+    LogMessage = "ОШИБКА #" & ErrorNumber & ": " & ErrorDescription & vbCrLf & _
+                "Источник: " & Source & ", строка: " & LineNumber & vbCrLf & _
+                "Время: " & Format(Now, "yyyy-mm-dd hh:mm:ss") & vbCrLf & _
+                "Пользователь: " & Environ("USERNAME")
+    
+    ' Добавление состояния переменных, если предоставлено
+    If Not VariablesState Is Nothing Then
+        LogMessage = LogMessage & vbCrLf & vbCrLf & "Состояние переменных:" & vbCrLf
+        
+        Dim VarName As Variant
+        For Each VarName In VariablesState.Keys
+            Dim VarValue As Variant
+            VarValue = VariablesState(VarName)
+            
+            ' Форматирование значения в зависимости от типа
+            Dim ValueStr As String
+            If IsObject(VarValue) Then
+                If VarValue Is Nothing Then
+                    ValueStr = "Nothing"
+                Else
+                    ValueStr = "Object: " & TypeName(VarValue)
+                End If
+            ElseIf IsNull(VarValue) Then
+                ValueStr = "Null"
+            ElseIf IsArray(VarValue) Then
+                ValueStr = "Array[" & GetArrayBounds(VarValue) & "]"
+            Else
+                ValueStr = CStr(VarValue)
+            End If
+            
+            LogMessage = LogMessage & "  " & VarName & " = " & ValueStr & vbCrLf
+        Next VarName
+    End If
+    
+    ' Получение стека вызовов (если возможно)
+    LogMessage = LogMessage & vbCrLf & "Стек вызовов:" & vbCrLf & GetCallStack()
+    
+    ' Запись в лог
+    Logger.Log_Error LogMessage, Source
+End Sub
+
+' Вспомогательная функция для получения границ массива
+Private Function GetArrayBounds(ByVal Arr As Variant) As String
+    On Error Resume Next
+    
+    Dim result As String
+    Dim Dimension As Integer
+    
+    ' Проверка на массив
+    If Not IsArray(Arr) Then
+        GetArrayBounds = "Not an array"
+        Exit Function
+    End If
+    
+    ' Определение размерности массива
+    Dimension = 1
+    Do
+        Dim lb As Long, ub As Long
+        lb = LBound(Arr, Dimension)
+        If Err.Number <> 0 Then Exit Do
+        
+        ub = UBound(Arr, Dimension)
+        If Err.Number <> 0 Then Exit Do
+        
+        If Len(result) > 0 Then result = result & ","
+        result = result & lb & ".." & ub
+        
+        Dimension = Dimension + 1
+    Loop
+    
+    GetArrayBounds = result
+End Function
+
+' Симуляция стека вызовов в VBA
+Private Function GetCallStack() As String
+    ' В VBA нет прямого доступа к стеку вызовов,
+    ' но его можно имитировать с помощью последовательных логов при входе/выходе из процедур
+    
+    ' В реальном приложении здесь может быть обращение к глобальной переменной или классу,
+    ' который отслеживает вызовы процедур
+    
+    GetCallStack = "  <данные стека вызовов недоступны>"
+End Function
+
+6.2 Мониторинг ошибок в приложении
+
+' Класс ErrorMonitor для анализа и мониторинга ошибок
+Option Explicit
+
+Private Type TErrorStatistics
+    TotalErrors As Long              ' Общее количество ошибок
+    ErrorsByType As Dictionary       ' Статистика по типам ошибок
+    ErrorsByModule As Dictionary     ' Статистика по модулям
+    LastErrors As Collection         ' Последние N ошибок
+    StartTime As Date                ' Время начала мониторинга
+End Type
+
+Private This As TErrorStatistics
+
+' Инициализация
+Private Sub Class_Initialize()
+    This.TotalErrors = 0
+    This.StartTime = Now
+    
+    Set This.ErrorsByType = New Dictionary
+    Set This.ErrorsByModule = New Dictionary
+    Set This.LastErrors = New Collection
+End Sub
+
+' Регистрация новой ошибки
+Public Sub RegisterError(ByVal ErrorNumber As Long, _
+                        ByVal ErrorDescription As String, _
+                        ByVal Source As String, _
+                        ByVal LineNumber As Long)
+    ' Увеличиваем общий счетчик ошибок
+    This.TotalErrors = This.TotalErrors + 1
+    
+    ' Обновляем статистику по типам ошибок
+    Dim ErrorType As String
+    ErrorType = GetErrorType(ErrorNumber)
+    
+    If This.ErrorsByType.Exists(ErrorType) Then
+        This.ErrorsByType(ErrorType) = This.ErrorsByType(ErrorType) + 1
+    Else
+        This.ErrorsByType.Add ErrorType, 1
+    End If
+    
+    ' Обновляем статистику по модулям
+    Dim ModuleName As String
+    ModuleName = GetModuleName(Source)
+    
+    If This.ErrorsByModule.Exists(ModuleName) Then
+        This.ErrorsByModule(ModuleName) = This.ErrorsByModule(ModuleName) + 1
+    Else
+        This.ErrorsByModule.Add ModuleName, 1
+    End If
+    
+    ' Добавляем в список последних ошибок
+    Dim ErrorInfo As Dictionary
+    Set ErrorInfo = New Dictionary
+    
+    ErrorInfo.Add "Number", ErrorNumber
+    ErrorInfo.Add "Description", ErrorDescription
+    ErrorInfo.Add "Source", Source
+    ErrorInfo.Add "Line", LineNumber
+    ErrorInfo.Add "Time", Now
+    
+    ' Добавляем в начало списка (FIFO)
+    This.LastErrors.Add ErrorInfo, , 1
+    
+    ' Ограничиваем количество хранимых ошибок
+    While This.LastErrors.Count > 20
+        This.LastErrors.Remove This.LastErrors.Count
+    Wend
+End Sub
+
+' Получение типа ошибки по ее номеру
+Private Function GetErrorType(ByVal ErrorNumber As Long) As String
+    If ErrorNumber >= ERR_BASE_VALIDATION And ErrorNumber < ERR_BASE_FILE Then
+        GetErrorType = "Валидация"
+    ElseIf ErrorNumber >= ERR_BASE_FILE And ErrorNumber < ERR_BASE_DATA Then
+        GetErrorType = "Файловая система"
+    ElseIf ErrorNumber >= ERR_BASE_DATA And ErrorNumber < ERR_BASE_UI Then
+        GetErrorType = "Данные"
+    ElseIf ErrorNumber >= ERR_BASE_UI And ErrorNumber < ERR_BASE_SYSTEM Then
+        GetErrorType = "Интерфейс"
+    ElseIf ErrorNumber >= ERR_BASE_SYSTEM Then
+        GetErrorType = "Система"
+    Else
+        GetErrorType = "Прочее"
+    End If
+End Function
+
+' Извлечение имени модуля из полного пути источника
+Private Function GetModuleName(ByVal Source As String) As String
+    Dim Parts As Variant
+    Parts = Split(Source, ".")
+    
+    If UBound(Parts) >= 0 Then
+        GetModuleName = Parts(0)
+    Else
+        GetModuleName = Source
+    End If
+End Function
+
+' Получение статистики ошибок в виде текста
+Public Function GetErrorStatistics() As String
+    Dim result As String
+    
+    ' Заголовок
+    result = "Статистика ошибок" & vbCrLf & _
+             "Начало мониторинга: " & Format(This.StartTime, "yyyy-mm-dd hh:mm:ss") & vbCrLf & _
+             "Текущее время: " & Format(Now, "yyyy-mm-dd hh:mm:ss") & vbCrLf & _
+             "Всего ошибок: " & This.TotalErrors & vbCrLf & vbCrLf
+    
+    ' Статистика по типам
+    result = result & "По типам ошибок:" & vbCrLf
+    Dim ErrorType As Variant
+    For Each ErrorType In This.ErrorsByType.Keys
+        result = result & "  " & ErrorType & ": " & This.ErrorsByType(ErrorType) & vbCrLf
+    Next ErrorType
+    
+    ' Статистика по модулям
+    result = result & vbCrLf & "По модулям:" & vbCrLf
+    Dim ModuleName As Variant
+    For Each ModuleName In This.ErrorsByModule.Keys
+        result = result & "  " & ModuleName & ": " & This.ErrorsByModule(ModuleName) & vbCrLf
+    Next ModuleName
+    
+    ' Последние ошибки
+    result = result & vbCrLf & "Последние ошибки:" & vbCrLf
+    Dim i As Integer
+    For i = 1 To This.LastErrors.Count
+        Dim ErrorInfo As Dictionary
+        Set ErrorInfo = This.LastErrors(i)
+        
+        result = result & "  " & i & ") " & Format(ErrorInfo("Time"), "hh:mm:ss") & _
+                 " - #" & ErrorInfo("Number") & ": " & ErrorInfo("Description") & _
+                 " (" & ErrorInfo("Source") & ")" & vbCrLf
+    Next i
+    
+    GetErrorStatistics = result
+End Function
+
+' Сброс статистики
+Public Sub ResetStatistics()
+    This.TotalErrors = 0
+    This.StartTime = Now
+    
+    Set This.ErrorsByType = New Dictionary
+    Set This.ErrorsByModule = New Dictionary
+    Set This.LastErrors = New Collection
+End Sub
+
+Заключение
+
+Представленная система обработки ошибок представляет собой комплексное решение, которое:
+
+1. Централизует обработку ошибок через специализированный класс ErrorHandler
+2. Обеспечивает типизацию ошибок для более структурированного и предсказуемого поведения
+3. Четко разделяет нормальный код и обработку ошибок, соблюдая рекомендации из Guidelines
+4. Предоставляет многоуровневую стратегию для обработки ошибок на разных уровнях приложения
+5. Интегрируется с системой валидации для предотвращения ошибок
+6. Обеспечивает расширенные возможности мониторинга и анализа для постоянного улучшения кода
+
+Такой подход к обработке ошибок значительно повышает надежность и удобство сопровождения VBA-приложений, особенно когда они достигают значительного размера и сложности.

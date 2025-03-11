@@ -1,0 +1,1265 @@
+#РЕГЛАМЕНТ ПО ИСПРАВЛЕНИЮ ОШИБОК В VBA-ПРИЛОЖЕНИЯХ
+
+1. Системный подход к исправлению ошибок
+
+Исправление ошибок — это не просто устранение отдельных проблем, а системный процесс, направленный на повышение качества кода и предотвращение повторного возникновения проблем. Данный регламент дополняет существующие регламенты по предотвращению и обработке ошибок, формируя полноценную стратегию управления ошибками в VBA-приложениях.
+
+1.1 Основные принципы исправления ошибок
+
+Эффективное исправление ошибок в VBA-приложениях основывается на следующих принципах:
+
+1. Точная идентификация — определение не только симптомов, но и корневой причины ошибки
+2. Системный анализ — рассмотрение ошибки в контексте всей архитектуры приложения
+3. Документирование — фиксация всего процесса от обнаружения до устранения ошибки
+4. Верификация — проверка эффективности исправления с помощью тестирования
+5. Профилактика — применение полученных уроков для предотвращения подобных ошибок в будущем
+
+1.2 Классификация исправлений
+
+В зависимости от характера ошибки, исправления могут быть следующих типов:
+
+1. Локальные исправления — точечные изменения в одной процедуре или функции
+
+' Было: неправильное получение индекса
+cell.Value = dataArray(index)  ' Может выйти за границы массива
+
+' Стало: проверка границ массива
+If index >= LBound(dataArray) And index <= UBound(dataArray) Then
+    cell.Value = dataArray(index)
+Else
+    LogError "Индекс " & index & " выходит за границы массива"
+End If
+
+2. Структурные исправления — изменения в архитектуре или взаимодействии компонентов
+
+' Было: прямой доступ к данным из пользовательского интерфейса
+Private Sub btnSave_Click()
+    ' Прямая запись в базу данных из обработчика события
+    conn.Execute "INSERT INTO Orders VALUES ('" & txtOrderID.Text & "',...)"
+End Sub
+
+' Стало: использование многоуровневой архитектуры
+Private Sub btnSave_Click()
+    Dim orderData As OrderData
+    ' Заполнение модели данных
+    Set orderData = GetOrderDataFromForm()
+    ' Передача в бизнес-слой
+    If Not OrderService.SaveOrder(orderData) Then
+        ShowErrorMessage "Не удалось сохранить заказ"
+    End If
+End Sub
+
+3. Превентивные исправления — изменения в коде, предотвращающие повторное возникновение ошибок
+
+' Добавление валидации входных данных ко всем публичным методам класса
+Public Sub ProcessOrder(ByVal orderID As String)
+    ' Превентивная проверка входных данных
+    ValidateOrderID orderID
+    ' Основная логика
+    ...
+End Sub
+
+Private Sub ValidateOrderID(ByVal orderID As String)
+    If Len(Trim(orderID)) = 0 Then
+        Err.Raise ERR_INVALID_INPUT, "ProcessOrder", "Идентификатор заказа не может быть пустым"
+    End If
+    
+    If Not IsNumeric(orderID) Then
+        Err.Raise ERR_INVALID_FORMAT, "ProcessOrder", "Идентификатор заказа должен быть числом"
+    End If
+End Sub
+
+2. Процесс диагностики и анализа ошибок
+
+2.1 Пошаговая диагностика
+
+1. Воспроизведение ошибки — создание управляемых условий, при которых ошибка стабильно воспроизводится
+
+Public Sub TestErrorCase()
+    On Error Resume Next
+    
+    ' Попытка воспроизвести ошибку в контролируемых условиях
+    ProcessCustomerData "Invalid123"
+    
+    ' Проверка наличия ошибки
+    If Err.Number <> 0 Then
+        Debug.Print "Ошибка воспроизведена: #" & Err.Number & " - " & Err.Description
+    Else
+        Debug.Print "Ошибка не воспроизводится при данных условиях"
+    End If
+End Sub
+
+2. Локализация ошибки — определение точного места в коде, где возникает ошибка
+
+Public Sub FindErrorLocation()
+    ' Включаем нумерацию строк для более точной локализации
+    10: On Error GoTo ErrorHandler
+    
+    20: Dim testData As Variant
+    30: testData = GetTestData()
+    40: ProcessTestData testData       ' Проблема может быть здесь
+    50: ValidateResults testData       ' Или здесь
+    
+    60: Exit Sub
+    
+    ErrorHandler:
+    70: Debug.Print "Ошибка в строке " & Erl & ": #" & Err.Number & " - " & Err.Description
+    80: Resume Next
+End Sub
+
+3. Анализ контекста — изучение состояния переменных и объектов в момент возникновения ошибки
+
+Public Sub AnalyzeErrorContext(ByVal parameter As Variant)
+    On Error GoTo ErrorHandler
+    
+    ' Установка точек логирования
+    Debug.Print "Входной параметр: " & TypeName(parameter) & " = " & parameter
+    
+    ' Пошаговый анализ
+    Dim intermediateResult As Variant
+    intermediateResult = TransformData(parameter)
+    Debug.Print "После трансформации: " & TypeName(intermediateResult) & " = " & intermediateResult
+    
+    ProcessTransformedData intermediateResult
+    Exit Sub
+    
+    ErrorHandler:
+    ' Запись состояния всех переменных
+    Debug.Print "Ошибка: #" & Err.Number & " - " & Err.Description
+    Debug.Print "Состояние параметра: " & TypeName(parameter)
+    Debug.Print "Состояние промежуточного результата: " & TypeName(intermediateResult)
+End Sub
+
+2.2 Использование инструментов диагностики
+
+1. Расширенное логирование — использование дополнительных уровней детализации при логировании
+
+Public Sub EnableDebugLogging()
+    ' Временно повышаем уровень детализации логирования
+    Dim logger As Logger
+    Set logger = GetLogger()
+    
+    ' Сохраняем текущий уровень логирования
+    Dim originalLevel As LogLevel
+    originalLevel = logger.GetLogLevel()
+    
+    ' Устанавливаем максимальный уровень детализации
+    logger.SetLogLevel LogDebug
+    
+    ' Выполняем проблемный код с расширенным логированием
+    Debug.Print "Логирование включено на уровне DEBUG"
+    
+    ' ... выполнение проблемного кода ...
+    
+    ' Восстанавливаем исходный уровень
+    logger.SetLogLevel originalLevel
+End Sub
+
+2. Отслеживание вызовов — регистрация последовательности вызовов до момента ошибки
+
+' Модуль для отслеживания стека вызовов
+Private mCallStack As Collection
+
+Public Sub PushToCallStack(ByVal procedureName As String)
+    If mCallStack Is Nothing Then Set mCallStack = New Collection
+    mCallStack.Add procedureName & " (" & Now & ")"
+    Debug.Print "ВХОД: " & procedureName
+End Sub
+
+Public Sub PopFromCallStack()
+    If Not mCallStack Is Nothing Then
+        If mCallStack.Count > 0 Then
+            Debug.Print "ВЫХОД: " & mCallStack(mCallStack.Count)
+            mCallStack.Remove mCallStack.Count
+        End If
+    End If
+End Sub
+
+Public Function GetCallStackAsString() As String
+    Dim result As String
+    Dim i As Integer
+    
+    result = "Стек вызовов:" & vbCrLf
+    
+    If mCallStack Is Nothing Then
+        result = result & "  <пусто>"
+        GetCallStackAsString = result
+        Exit Function
+    End If
+    
+    For i = mCallStack.Count To 1 Step -1
+        result = result & "  " & i & ") " & mCallStack(i) & vbCrLf
+    Next i
+    
+    GetCallStackAsString = result
+End Function
+
+3. Профилирование кода — измерение времени выполнения отдельных частей кода
+
+Public Sub ProfileProblemCode()
+    Dim startTime As Double
+    Dim endTime As Double
+    
+    ' Общее время выполнения
+    startTime = Timer
+    
+    ' Профилирование отдельных частей
+    Dim step1Time As Double
+    step1Time = Timer
+    Step1_LoadData
+    Debug.Print "Шаг 1 (загрузка): " & (Timer - step1Time) & " секунд"
+    
+    Dim step2Time As Double
+    step2Time = Timer
+    Step2_ProcessData
+    Debug.Print "Шаг 2 (обработка): " & (Timer - step2Time) & " секунд"
+    
+    Dim step3Time As Double
+    step3Time = Timer
+    Step3_SaveResults
+    Debug.Print "Шаг 3 (сохранение): " & (Timer - step3Time) & " секунд"
+    
+    ' Итоговое время
+    endTime = Timer
+    Debug.Print "Общее время выполнения: " & (endTime - startTime) & " секунд"
+End Sub
+
+3. Методология исправления ошибок
+
+3.1 Пошаговый процесс исправления
+
+1. Проверка исходных предположений — анализ базовых предположений, которые могли привести к ошибке
+
+' Проверка предположения о типе входных данных
+Public Sub ValidateAssumptions()
+    Dim data As Variant
+    data = GetDataFromSource()
+    
+    ' Проверка предположения о типе данных
+    Debug.Print "Тип полученных данных: " & TypeName(data)
+    
+    ' Проверка предположения о структуре данных
+    If IsArray(data) Then
+        Debug.Print "Размерность массива: " & GetArrayInfo(data)
+    ElseIf TypeOf data Is Collection Then
+        Debug.Print "Количество элементов в коллекции: " & data.Count
+    ElseIf TypeOf data Is Dictionary Then
+        Debug.Print "Количество элементов в словаре: " & data.Count
+    End If
+End Sub
+
+Private Function GetArrayInfo(ByVal arr As Variant) As String
+    On Error Resume Next
+    Dim dimensions As Integer
+    dimensions = 0
+    
+    Do
+        dimensions = dimensions + 1
+        Dim lb As Long, ub As Long
+        lb = LBound(arr, dimensions)
+        If Err.Number <> 0 Then
+            Err.Clear
+            dimensions = dimensions - 1
+            Exit Do
+        End If
+        ub = UBound(arr, dimensions)
+    Loop
+    
+    GetArrayInfo = dimensions & "D[" & LBound(arr, 1) & ".." & UBound(arr, 1) & "]"
+End Function
+
+2. Разработка решения — создание и тестирование возможных решений проблемы
+
+Public Sub DevelopSolution()
+    ' 1. Создание изолированного тестового случая
+    CreateIsolatedTestCase
+    
+    ' 2. Разработка нескольких вариантов решения
+    Dim solution1Success As Boolean
+    solution1Success = TestSolution1
+    Debug.Print "Решение 1: " & IIf(solution1Success, "УСПЕХ", "НЕУДАЧА")
+    
+    Dim solution2Success As Boolean
+    solution2Success = TestSolution2
+    Debug.Print "Решение 2: " & IIf(solution2Success, "УСПЕХ", "НЕУДАЧА")
+    
+    ' 3. Выбор оптимального решения
+    If solution1Success And solution2Success Then
+        ' Если оба решения работают, сравниваем их эффективность
+        CompareSolutions
+    ElseIf solution1Success Then
+        Debug.Print "Выбрано решение 1"
+    ElseIf solution2Success Then
+        Debug.Print "Выбрано решение 2"
+    Else
+        Debug.Print "Необходима разработка нового решения"
+    End If
+End Sub
+
+3. Тщательное тестирование — проверка решения на всех возможных входных данных
+
+Public Sub TestSolution()
+    ' Тестирование на стандартных случаях
+    TestCase "Стандартный случай", "Normal Data"
+    
+    ' Тестирование на краевых случаях
+    TestCase "Пустое значение", ""
+    TestCase "Очень длинное значение", String(1000, "A")
+    
+    ' Тестирование на спец. символах
+    TestCase "Специальные символы", "!@#$%^&*()"
+    TestCase "Символы SQL-инъекции", "'; DROP TABLE Users; --"
+    
+    ' Тестирование на минимальных/максимальных значениях
+    TestCase "Минимальное число", -2147483648#  ' Минимум Long
+    TestCase "Максимальное число", 2147483647#   ' Максимум Long
+    
+    ' Тестирование на некорректных типах данных
+    TestCaseVariant "Массив", Array(1, 2, 3)
+    TestCaseVariant "Объект", New Collection
+    TestCaseVariant "Null", Null
+End Sub
+
+Private Sub TestCase(ByVal testName As String, ByVal testData As String)
+    On Error Resume Next
+    
+    ' Выполнение тестируемой функции
+    Dim result As Variant
+    result = ProcessString(testData)
+    
+    ' Проверка результата
+    If Err.Number = 0 Then
+        Debug.Print "УСПЕХ - " & testName & ": " & result
+    Else
+        Debug.Print "ОШИБКА - " & testName & ": #" & Err.Number & " - " & Err.Description
+    End If
+    
+    Err.Clear
+End Sub
+
+Private Sub TestCaseVariant(ByVal testName As String, ByVal testData As Variant)
+    On Error Resume Next
+    
+    ' Выполнение тестируемой функции
+    Dim result As Variant
+    result = ProcessVariant(testData)
+    
+    ' Проверка результата
+    If Err.Number = 0 Then
+        Debug.Print "УСПЕХ - " & testName
+    Else
+        Debug.Print "ОШИБКА - " & testName & ": #" & Err.Number & " - " & Err.Description
+    End If
+    
+    Err.Clear
+End Sub
+
+3.2 Исправление типичных ошибок VBA
+
+1. Ошибки обращения к объектам
+
+' Было: Ошибка обращения к несуществующему объекту
+Private Sub UnsafeObjectAccess()
+    Dim wb As Workbook
+    Set wb = Workbooks("Data.xlsx")   ' Ошибка, если книга не открыта
+    wb.Sheets("Sheet1").Range("A1").Value = "Data"
+End Sub
+
+' Стало: Безопасное обращение с проверкой существования
+Private Sub SafeObjectAccess()
+    Dim wb As Workbook
+    
+    ' Проверка существования книги
+    On Error Resume Next
+    Set wb = Workbooks("Data.xlsx")
+    On Error GoTo 0
+    
+    If wb Is Nothing Then
+        ' Попытка открыть книгу
+        On Error Resume Next
+        Set wb = Workbooks.Open("C:\Data\Data.xlsx")
+        On Error GoTo 0
+        
+        If wb Is Nothing Then
+            MsgBox "Невозможно найти или открыть книгу Data.xlsx"
+            Exit Sub
+        End If
+    End If
+    
+    ' Проверка существования листа
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Sheets("Sheet1")
+    On Error GoTo 0
+    
+    If ws Is Nothing Then
+        MsgBox "Лист Sheet1 не найден в книге Data.xlsx"
+        Exit Sub
+    End If
+    
+    ' Теперь безопасное обращение к ячейке
+    ws.Range("A1").Value = "Data"
+End Sub
+
+2. Ошибки индексации массивов и коллекций
+
+' Было: Ошибка выхода за границы массива
+Private Sub UnsafeArrayAccess()
+    Dim data(1 To 10) As Integer
+    Dim i As Integer
+    
+    For i = 0 To 10   ' Ошибка - выход за нижнюю границу массива при i=0
+        data(i) = i
+    Next i
+End Sub
+
+' Стало: Безопасная работа с массивом
+Private Sub SafeArrayAccess()
+    Dim data(1 To 10) As Integer
+    Dim i As Integer
+    
+    ' Правильный цикл по границам массива
+    For i = LBound(data) To UBound(data)
+        data(i) = i
+    Next i
+    
+    ' Безопасное обращение к элементу массива
+    Function GetArrayElement(ByVal arr As Variant, ByVal index As Long) As Variant
+        If Not IsArray(arr) Then
+            Err.Raise ERR_INVALID_TYPE, "GetArrayElement", "Первый параметр должен быть массивом"
+        End If
+        
+        If index < LBound(arr) Or index > UBound(arr) Then
+            ' Если индекс вне диапазона - возвращаем Null или генерируем ошибку
+            GetArrayElement = Null
+            Exit Function
+            ' Или: Err.Raise ERR_INVALID_RANGE, "GetArrayElement", "Индекс вне границ массива"
+        End If
+        
+        GetArrayElement = arr(index)
+    End Function
+End Sub
+
+3. Ошибки типов данных
+
+' Было: Ошибка преобразования типов
+Private Sub UnsafeTypeConversion()
+    Dim userInput As String
+    userInput = InputBox("Введите число")
+    
+    Dim value As Integer
+    value = CInt(userInput)   ' Ошибка, если ввод не является числом
+End Sub
+
+' Стало: Безопасное преобразование типов
+Private Sub SafeTypeConversion()
+    Dim userInput As String
+    userInput = InputBox("Введите число")
+    
+    Dim value As Integer
+    
+    ' Проверка перед преобразованием
+    If IsNumeric(userInput) Then
+        ' Дополнительная проверка на диапазон Integer
+        If CDbl(userInput) >= -32768 And CDbl(userInput) <= 32767 Then
+            value = CInt(userInput)
+        Else
+            MsgBox "Число вне допустимого диапазона Integer"
+            Exit Sub
+        End If
+    Else
+        MsgBox "Введено не числовое значение"
+        Exit Sub
+    End If
+End Sub
+
+' Универсальные функции безопасного преобразования
+Function SafeInt(ByVal Value As Variant, Optional ByVal DefaultValue As Integer = 0) As Integer
+    On Error Resume Next
+    If IsNumeric(Value) Then
+        SafeInt = CInt(Value)
+        If Err.Number <> 0 Then
+            SafeInt = DefaultValue
+        End If
+    Else
+        SafeInt = DefaultValue
+    End If
+    On Error GoTo 0
+End Function
+
+4. Документирование и паспортизация ошибок
+
+4.1 Паспорт ошибки
+
+Паспорт ошибки — это структурированный документ, содержащий всю информацию о выявленной ошибке, процессе ее анализа и исправления. Паспорт должен содержать:
+
+' Функция создания и сохранения паспорта ошибки
+Public Sub CreateErrorPassport(ByVal ErrorNumber As Long, _
+                              ByVal ErrorDescription As String, _
+                              ByVal ProcedureName As String, _
+                              ByVal ErrorCause As String, _
+                              ByVal FixMethod As String, _
+                              ByVal FixResult As String, _
+                              ByVal Successful As Boolean)
+                              
+    ' Создание имени файла на основе даты, времени и кода ошибки
+    Dim fileName As String
+    fileName = "ErrorPassport_" & Format(Now, "yyyymmdd_hhnnss") & "_" & ErrorNumber & ".txt"
+    
+    ' Путь к папке с паспортами ошибок
+    Dim folderPath As String
+    folderPath = GetErrorPassportFolderPath()
+    
+    ' Создание папки, если она не существует
+    On Error Resume Next
+    MkDir folderPath
+    On Error GoTo 0
+    
+    ' Формирование полного пути к файлу
+    Dim filePath As String
+    filePath = folderPath & "\" & fileName
+    
+    ' Формирование содержимого паспорта
+    Dim content As String
+    content = "ПАСПОРТ ОШИБКИ" & vbCrLf & vbCrLf
+    content = content & "Дата и время: " & Format(Now, "yyyy-mm-dd hh:nn:ss") & vbCrLf
+    content = content & "Пользователь: " & Environ("USERNAME") & vbCrLf
+    content = content & "Компьютер: " & Environ("COMPUTERNAME") & vbCrLf & vbCrLf
+    
+    content = content & "1. ИНФОРМАЦИЯ ОБ ОШИБКЕ" & vbCrLf
+    content = content & "-------------------------" & vbCrLf
+    content = content & "Код ошибки: " & ErrorNumber & vbCrLf
+    content = content & "Текст ошибки: " & ErrorDescription & vbCrLf & vbCrLf
+    
+    content = content & "2. ПРОЦЕДУРА С ОШИБКОЙ" & vbCrLf
+    content = content & "---------------------" & vbCrLf
+    content = content & "Имя процедуры: " & ProcedureName & vbCrLf & vbCrLf
+    
+    content = content & "3. ПРИЧИНА ВОЗНИКНОВЕНИЯ" & vbCrLf
+    content = content & "------------------------" & vbCrLf
+    content = content & ErrorCause & vbCrLf & vbCrLf
+    
+    content = content & "4. ИСПРАВЛЕНИЕ ОШИБКИ" & vbCrLf
+    content = content & "---------------------" & vbCrLf
+    content = content & FixMethod & vbCrLf & vbCrLf
+    
+    content = content & "5. РЕЗУЛЬТАТ" & vbCrLf
+    content = content & "------------" & vbCrLf
+    content = content & "Статус: " & IIf(Successful, "УСПЕШНО", "НЕУСПЕШНО") & vbCrLf
+    content = content & FixResult & vbCrLf & vbCrLf
+    
+    content = content & "6. ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ" & vbCrLf
+    content = content & "-----------------------------" & vbCrLf
+    content = content & "Версия приложения: " & GetAppVersion() & vbCrLf
+    content = content & "Окружение: " & GetEnvironmentInfo() & vbCrLf
+    
+    ' Запись файла
+    WriteTextFile filePath, content
+    
+    ' Логирование создания паспорта
+    GetLogger.Log_Info "Создан паспорт ошибки: " & fileName, "CreateErrorPassport"
+End Sub
+
+' Получение пути к папке для паспортов ошибок
+Private Function GetErrorPassportFolderPath() As String
+    ' Базовый путь к данным приложения
+    Dim basePath As String
+    basePath = GetAppDataPath()
+    
+    ' Папка для паспортов ошибок
+    GetErrorPassportFolderPath = basePath & "\ErrorPassports"
+End Function
+
+' Получение версии приложения
+Private Function GetAppVersion() As String
+    ' Здесь должен быть код получения версии из метаданных приложения
+    GetAppVersion = "1.0.0"
+End Function
+
+' Получение информации об окружении
+Private Function GetEnvironmentInfo() As String
+    Dim info As String
+    info = "Excel " & Application.Version
+    info = info & ", Windows " & GetWindowsVersion()
+    GetEnvironmentInfo = info
+End Function
+
+' Получение версии Windows
+Private Function GetWindowsVersion() As String
+    ' Упрощенная версия для примера
+    GetWindowsVersion = "10"
+End Function
+
+4.2 Формат паспорта ошибки
+
+Паспорт ошибки сохраняется в текстовом файле со следующей структурой:
+
+ПАСПОРТ ОШИБКИ
+
+Дата и время: 2023-10-15 14:35:22
+Пользователь: JohnDoe
+Компьютер: DESKTOP-ABC123
+
+1. ИНФОРМАЦИЯ ОБ ОШИБКЕ
+-------------------------
+Код ошибки: 9
+Текст ошибки: Индекс вне диапазона
+
+2. ПРОЦЕДУРА С ОШИБКОЙ
+---------------------
+Имя процедуры: Module1.ProcessData
+
+3. ПРИЧИНА ВОЗНИКНОВЕНИЯ
+------------------------
+Ошибка возникает при попытке обращения к элементу массива с индексом, выходящим
+за границы массива. Функция ProcessData использует цикл с диапазоном от 0 до 10,
+но массив data объявлен с диапазоном от 1 до 10.
+
+4. ИСПРАВЛЕНИЕ ОШИБКИ
+---------------------
+Исправление заключается в изменении границ цикла для соответствия границам массива.
+Было:
+For i = 0 To 10
+    data(i) = i
+Next i
+
+Стало:
+For i = LBound(data) To UBound(data)
+    data(i) = i
+Next i
+
+5. РЕЗУЛЬТАТ
+------------
+Статус: УСПЕШНО
+После исправления ошибка больше не возникает. Дополнительно были добавлены
+проверки границ массива во всех подобных циклах проекта.
+
+6. ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ
+-----------------------------
+Версия приложения: 1.0.0
+Окружение: Excel 16.0, Windows 10
+
+4.3 Интеграция паспортизации в систему обработки ошибок
+
+Для автоматического создания паспортов при возникновении ошибок класс ErrorHandler можно расширить дополнительным методом:
+
+' Расширение класса ErrorHandler методом паспортизации
+Public Sub CreateErrorPassportFromError(ByVal ErrorNumber As Long, _
+                                       ByVal ErrorDescription As String, _
+                                       ByVal Source As String, _
+                                       ByVal LineNumber As Long, _
+                                       ByVal ErrorCause As String, _
+                                       ByVal FixMethod As String, _
+                                       ByVal FixResult As String, _
+                                       ByVal Successful As Boolean)
+                                       
+    ' Создаем паспорт ошибки
+    Dim passportCreator As ErrorPassportCreator
+    Set passportCreator = New ErrorPassportCreator
+    
+    passportCreator.CreateErrorPassport ErrorNumber, ErrorDescription, Source, _
+                                      ErrorCause, FixMethod, FixResult, Successful
+                                      
+    ' Логируем создание паспорта
+    If This.LogErrors Then
+        If Not This.Logger Is Nothing Then
+            If This.Logger.IsLoggerInitialized Then
+                This.Logger.Log_Info "Создан паспорт ошибки для #" & ErrorNumber & " в " & Source, MODULE_NAME
+            End If
+        End If
+    End If
+End Sub
+
+5. Процесс учета и анализа ошибок
+
+5.1 Ведение журнала ошибок
+
+' Класс ErrorAnalyzer для анализа паспортов ошибок
+Option Explicit
+
+Private Type TErrorAnalysisState
+    PassportsFolder As String
+    ErrorRegistry As Dictionary  ' Ключ: код ошибки, Значение: количество случаев
+    ProcedureRegistry As Dictionary  ' Ключ: имя процедуры, Значение: количество ошибок
+    SuccessRegistry As Dictionary  ' Ключ: метод исправления, Значение: процент успеха
+End Type
+
+Private This As TErrorAnalysisState
+
+' Инициализация анализатора
+Private Sub Class_Initialize()
+    Set This.ErrorRegistry = New Dictionary
+    Set This.ProcedureRegistry = New Dictionary
+    Set This.SuccessRegistry = New Dictionary
+    This.PassportsFolder = GetErrorPassportFolderPath()
+End Sub
+
+' Анализ всех имеющихся паспортов ошибок
+Public Sub AnalyzeAllErrorPassports()
+    ' Очистка реестров перед анализом
+    Set This.ErrorRegistry = New Dictionary
+    Set This.ProcedureRegistry = New Dictionary
+    Set This.SuccessRegistry = New Dictionary
+    
+    ' Получение списка файлов паспортов
+    Dim fileNames As Collection
+    Set fileNames = GetAllErrorPassportFiles()
+    
+    ' Анализ каждого паспорта
+    Dim fileName As Variant
+    For Each fileName In fileNames
+        AnalyzeErrorPassport This.PassportsFolder & "\" & fileName
+    Next fileName
+    
+    ' Формирование отчета
+    GenerateErrorAnalysisReport
+End Sub
+
+' Получение списка всех файлов паспортов ошибок
+Private Function GetAllErrorPassportFiles() As Collection
+    Dim result As New Collection
+    
+    ' Проверка существования папки
+    If Dir(This.PassportsFolder, vbDirectory) = "" Then
+        Exit Function
+    End If
+    
+    ' Получение списка файлов
+    Dim fileName As String
+    fileName = Dir(This.PassportsFolder & "\ErrorPassport_*.txt")
+    
+    While Len(fileName) > 0
+        result.Add fileName
+        fileName = Dir()
+    Wend
+    
+    Set GetAllErrorPassportFiles = result
+End Function
+
+' Анализ одного файла паспорта ошибки
+Private Sub AnalyzeErrorPassport(ByVal filePath As String)
+    ' Чтение файла
+    Dim content As String
+    content = ReadTextFile(filePath)
+    
+    ' Извлечение данных из паспорта
+    Dim errorCode As String
+    errorCode = ExtractValueFromPassport(content, "Код ошибки:")
+    
+    Dim procedure As String
+    procedure = ExtractValueFromPassport(content, "Имя процедуры:")
+    
+    Dim fixMethod As String
+    fixMethod = ExtractSectionFromPassport(content, "4. ИСПРАВЛЕНИЕ ОШИБКИ", "5. РЕЗУЛЬТАТ")
+    
+    Dim successful As Boolean
+    successful = (InStr(content, "Статус: УСПЕШНО") > 0)
+    
+    ' Обновление реестров
+    UpdateErrorRegistry errorCode
+    UpdateProcedureRegistry procedure
+    UpdateSuccessRegistry fixMethod, successful
+End Sub
+
+' Извлечение значения из паспорта по ключу
+Private Function ExtractValueFromPassport(ByVal content As String, ByVal key As String) As String
+    Dim pos As Long
+    pos = InStr(content, key)
+    
+    If pos = 0 Then
+        ExtractValueFromPassport = ""
+        Exit Function
+    End If
+    
+    Dim lineEnd As Long
+    lineEnd = InStr(pos, content, vbCrLf)
+    
+    If lineEnd = 0 Then
+        lineEnd = Len(content) + 1
+    End If
+    
+    ExtractValueFromPassport = Trim(Mid(content, pos + Len(key), lineEnd - pos - Len(key)))
+End Function
+
+' Извлечение раздела из паспорта
+Private Function ExtractSectionFromPassport(ByVal content As String, ByVal startSection As String, ByVal endSection As String) As String
+    Dim startPos As Long
+    startPos = InStr(content, startSection)
+    
+    If startPos = 0 Then
+        ExtractSectionFromPassport = ""
+        Exit Function
+    End If
+    
+    ' Переход к следующей строке после заголовка раздела
+    startPos = InStr(startPos, content, vbCrLf)
+    If startPos = 0 Then
+        ExtractSectionFromPassport = ""
+        Exit Function
+    End If
+    
+    ' Пропуск линии подчеркивания
+    startPos = InStr(startPos + 2, content, vbCrLf)
+    If startPos = 0 Then
+        ExtractSectionFromPassport = ""
+        Exit Function
+    End If
+    
+    ' Начало содержимого раздела
+    startPos = startPos + 2
+    
+    Dim endPos As Long
+    endPos = InStr(startPos, content, endSection)
+    
+    If endPos = 0 Then
+        endPos = Len(content) + 1
+    End If
+    
+    ExtractSectionFromPassport = Trim(Mid(content, startPos, endPos - startPos))
+End Function
+
+' Обновление реестра ошибок
+Private Sub UpdateErrorRegistry(ByVal errorCode As String)
+    If Len(errorCode) = 0 Then Exit Sub
+    
+    If This.ErrorRegistry.Exists(errorCode) Then
+        This.ErrorRegistry(errorCode) = This.ErrorRegistry(errorCode) + 1
+    Else
+        This.ErrorRegistry.Add errorCode, 1
+    End If
+End Sub
+
+' Обновление реестра процедур
+Private Sub UpdateProcedureRegistry(ByVal procedure As String)
+    If Len(procedure) = 0 Then Exit Sub
+    
+    If This.ProcedureRegistry.Exists(procedure) Then
+        This.ProcedureRegistry(procedure) = This.ProcedureRegistry(procedure) + 1
+    Else
+        This.ProcedureRegistry.Add procedure, 1
+    End If
+End Sub
+
+' Обновление реестра успешности методов исправления
+Private Sub UpdateSuccessRegistry(ByVal fixMethod As String, ByVal successful As Boolean)
+    If Len(fixMethod) = 0 Then Exit Sub
+    
+    ' Создаем хеш метода исправления для использования в качестве ключа
+    Dim methodHash As String
+    methodHash = GetStringHash(fixMethod)
+    
+    ' Обновляем данные об успешности
+    If Not This.SuccessRegistry.Exists(methodHash) Then
+        ' Инициализация счетчиков для нового метода
+        This.SuccessRegistry.Add methodHash, Array(fixMethod, 0, 0)  ' Метод, успехи, всего
+    End If
+    
+    ' Обновление счетчиков
+    Dim methodData As Variant
+    methodData = This.SuccessRegistry(methodHash)
+    
+    methodData(2) = methodData(2) + 1  ' Общее количество применений
+    If successful Then
+        methodData(1) = methodData(1) + 1  ' Количество успешных применений
+    End If
+    
+    This.SuccessRegistry(methodHash) = methodData
+End Sub
+
+' Вычисление хеша строки (простая реализация)
+Private Function GetStringHash(ByVal text As String) As String
+    Dim result As Long
+    result = 0
+    
+    Dim i As Long
+    For i = 1 To Len(text)
+        result = (result * 31 + Asc(Mid(text, i, 1))) Mod 1000000
+    Next i
+    
+    GetStringHash = "H" & result
+End Function
+
+' Формирование отчета по анализу ошибок
+Public Sub GenerateErrorAnalysisReport()
+    ' Создание имени файла отчета
+    Dim reportFileName As String
+    reportFileName = "ErrorAnalysisReport_" & Format(Now, "yyyymmdd_hhnnss") & ".txt"
+    
+    ' Путь к файлу отчета
+    Dim reportPath As String
+    reportPath = This.PassportsFolder & "\" & reportFileName
+    
+    ' Формирование содержимого отчета
+    Dim content As String
+    content = "ОТЧЕТ ПО АНАЛИЗУ ОШИБОК" & vbCrLf & vbCrLf
+    content = content & "Дата и время: " & Format(Now, "yyyy-mm-dd hh:nn:ss") & vbCrLf
+    content = content & "Количество проанализированных паспортов: " & GetTotalPassportsCount() & vbCrLf & vbCrLf
+    
+    ' Раздел по типам ошибок
+    content = content & "1. РАСПРЕДЕЛЕНИЕ ОШИБОК ПО КОДАМ" & vbCrLf
+    content = content & "--------------------------------" & vbCrLf
+    
+    If This.ErrorRegistry.Count = 0 Then
+        content = content & "Нет данных" & vbCrLf
+    Else
+        Dim errorCode As Variant
+        For Each errorCode In This.ErrorRegistry.Keys
+            content = content & "Код " & errorCode & ": " & This.ErrorRegistry(errorCode) & " случаев" & vbCrLf
+        Next errorCode
+    End If
+    
+    content = content & vbCrLf
+    
+    ' Раздел по проблемным процедурам
+    content = content & "2. РАСПРЕДЕЛЕНИЕ ОШИБОК ПО ПРОЦЕДУРАМ" & vbCrLf
+    content = content & "-------------------------------------" & vbCrLf
+    
+    If This.ProcedureRegistry.Count = 0 Then
+        content = content & "Нет данных" & vbCrLf
+    Else
+        Dim procedure As Variant
+        For Each procedure In This.ProcedureRegistry.Keys
+            content = content & procedure & ": " & This.ProcedureRegistry(procedure) & " ошибок" & vbCrLf
+        Next procedure
+    End If
+    
+    content = content & vbCrLf
+    
+    ' Раздел по эффективности методов исправления
+    content = content & "3. ЭФФЕКТИВНОСТЬ МЕТОДОВ ИСПРАВЛЕНИЯ" & vbCrLf
+    content = content & "-------------------------------------" & vbCrLf
+    
+    If This.SuccessRegistry.Count = 0 Then
+        content = content & "Нет данных" & vbCrLf
+    Else
+        Dim methodHash As Variant
+        For Each methodHash In This.SuccessRegistry.Keys
+            Dim methodData As Variant
+            methodData = This.SuccessRegistry(methodHash)
+            
+            Dim successRate As Double
+            If methodData(2) > 0 Then
+                successRate = methodData(1) / methodData(2) * 100
+            Else
+                successRate = 0
+            End If
+            
+            content = content & "Метод: " & Left(methodData(0), 50) & "..." & vbCrLf
+            content = content & "  Успешность: " & Format(successRate, "0.00") & "% (" & _
+                                methodData(1) & " из " & methodData(2) & ")" & vbCrLf & vbCrLf
+        Next methodHash
+    End If
+    
+    ' Запись файла отчета
+    WriteTextFile reportPath, content
+    
+    ' Логирование создания отчета
+    GetLogger.Log_Info "Создан отчет по анализу ошибок: " & reportFileName, "ErrorAnalyzer"
+End Sub
+
+' Получение общего количества проанализированных паспортов
+Private Function GetTotalPassportsCount() As Long
+    Dim totalCount As Long
+    totalCount = 0
+    
+    ' Если есть данные в реестре ошибок, суммируем количество
+    If This.ErrorRegistry.Count > 0 Then
+        Dim errorCode As Variant
+        For Each errorCode In This.ErrorRegistry.Keys
+            totalCount = totalCount + This.ErrorRegistry(errorCode)
+        Next errorCode
+    End If
+    
+    GetTotalPassportsCount = totalCount
+End Function
+
+5.2 Статистический анализ ошибок
+
+На основе собранных паспортов ошибок может проводиться статистический анализ для выявления:
+
+1. Наиболее частых типов ошибок — определяет направления для улучшения кода
+2. Проблемных участков кода — модули и процедуры, в которых чаще всего возникают ошибки
+3. Эффективности методов исправления — какие подходы к исправлению наиболее результативны
+4. Тенденций во времени — увеличение или уменьшение частоты ошибок после внесения изменений
+
+5.3 Непрерывное улучшение
+
+На основе накопленных данных можно сформировать рекомендации для разработчиков:
+
+' Создание рекомендаций на основе анализа ошибок
+Public Sub GenerateRecommendations()
+    ' Анализ паспортов ошибок
+    AnalyzeAllErrorPassports
+    
+    ' Создание имени файла рекомендаций
+    Dim recommendationsFileName As String
+    recommendationsFileName = "DevelopmentRecommendations_" & Format(Now, "yyyymmdd") & ".txt"
+    
+    ' Путь к файлу рекомендаций
+    Dim recommendationsPath As String
+    recommendationsPath = This.PassportsFolder & "\" & recommendationsFileName
+    
+    ' Формирование содержимого рекомендаций
+    Dim content As String
+    content = "РЕКОМЕНДАЦИИ ПО УЛУЧШЕНИЮ КОДА" & vbCrLf & vbCrLf
+    content = content & "Дата: " & Format(Now, "yyyy-mm-dd") & vbCrLf & vbCrLf
+    
+    ' Получение наиболее частых ошибок
+    Dim topErrors As Collection
+    Set topErrors = GetTopErrors(5)
+    
+    ' Формирование рекомендаций по типам ошибок
+    content = content & "1. РЕКОМЕНДАЦИИ ПО ПРЕДОТВРАЩЕНИЮ ЧАСТЫХ ОШИБОК" & vbCrLf
+    content = content & "-------------------------------------------" & vbCrLf & vbCrLf
+    
+    Dim i As Integer
+    For i = 1 To topErrors.Count
+        Dim errorInfo As Variant
+        errorInfo = topErrors(i)
+        
+        content = content & i & ". Ошибка #" & errorInfo(0) & " (" & errorInfo(1) & " случаев)" & vbCrLf
+        
+        ' Формирование рекомендаций в зависимости от кода ошибки
+        Select Case CInt(errorInfo(0))
+            Case 9  ' Индекс вне диапазона
+                content = content & "   Рекомендация: Всегда используйте LBound и UBound при работе с массивами." & vbCrLf
+                content = content & "   Пример: For i = LBound(arr) To UBound(arr)" & vbCrLf
+                content = content & "   Добавьте проверки границ массива перед обращением к элементам." & vbCrLf
+                
+            Case 91  ' Объект не установлен
+                content = content & "   Рекомендация: Всегда проверяйте объекты на Nothing перед использованием." & vbCrLf
+                content = content & "   Пример: If Not obj Is Nothing Then" & vbCrLf
+                content = content & "   Используйте защитное программирование при работе с объектами." & vbCrLf
+                
+            Case 13  ' Несоответствие типов
+                content = content & "   Рекомендация: Используйте явные преобразования типов." & vbCrLf
+                content = content & "   Убедитесь, что все операции выполняются над данными совместимых типов." & vbCrLf
+                content = content & "   Проверяйте типы данных перед операциями." & vbCrLf
+                
+            Case Else
+                content = content & "   Требуется дополнительный анализ для формирования рекомендаций." & vbCrLf
+        End Select
+        
+        content = content & vbCrLf
+    Next i
+    
+    ' Получение наиболее проблемных модулей
+    Dim topProcedures As Collection
+    Set topProcedures = GetTopProcedures(5)
+    
+    ' Формирование рекомендаций по проблемным модулям
+    content = content & "2. МОДУЛИ, ТРЕБУЮЩИЕ ПОВЫШЕННОГО ВНИМАНИЯ" & vbCrLf
+    content = content & "----------------------------------------" & vbCrLf & vbCrLf
+    
+    For i = 1 To topProcedures.Count
+        Dim procInfo As Variant
+        procInfo = topProcedures(i)
+        
+        content = content & i & ". " & procInfo(0) & " (" & procInfo(1) & " ошибок)" & vbCrLf
+        content = content & "   Рекомендация: Провести код-ревью этого модуля." & vbCrLf
+        content = content & "   Рассмотреть возможность рефакторинга или разделения на более мелкие компоненты." & vbCrLf
+        content = content & "   Добавить дополнительное тестирование для этого модуля." & vbCrLf & vbCrLf
+    Next i
+    
+    ' Получение наиболее эффективных методов исправления
+    Dim topMethods As Collection
+    Set topMethods = GetTopFixMethods(3)
+    
+    ' Формирование рекомендаций по методам исправления
+    content = content & "3. НАИБОЛЕЕ ЭФФЕКТИВНЫЕ МЕТОДЫ ИСПРАВЛЕНИЯ" & vbCrLf
+    content = content & "----------------------------------------" & vbCrLf & vbCrLf
+    
+    For i = 1 To topMethods.Count
+        Dim methodInfo As Variant
+        methodInfo = topMethods(i)
+        
+        content = content & i & ". Метод с эффективностью " & Format(methodInfo(2), "0.00") & "%:" & vbCrLf
+        content = content & "   " & methodInfo(0) & vbCrLf & vbCrLf
+    Next i
+    
+    ' Общие рекомендации
+    content = content & "4. ОБЩИЕ РЕКОМЕНДАЦИИ" & vbCrLf
+    content = content & "---------------------" & vbCrLf & vbCrLf
+    content = content & "1. Следуйте принципам защитного программирования, указанным в регламенте." & vbCrLf
+    content = content & "2. Активно документируйте все выявленные ошибки и их исправления." & vbCrLf
+    content = content & "3. Регулярно проводите анализ накопленных паспортов ошибок." & vbCrLf
+    content = content & "4. Обновляйте регламенты на основе полученного опыта." & vbCrLf & vbCrLf
+    
+    ' Запись файла рекомендаций
+    WriteTextFile recommendationsPath, content
+    
+    ' Логирование создания рекомендаций
+    GetLogger.Log_Info "Созданы рекомендации по улучшению кода: " & recommendationsFileName, "ErrorAnalyzer"
+End Sub
+
+6. Интеграция ИИ-помощника в процесс исправления ошибок
+
+6.1 Роль ИИ-помощника
+
+ИИ-помощник может играть ключевую роль в процессе исправления ошибок, выполняя следующие функции:
+
+1. Создание паспортов ошибок — автоматическое формирование структурированных документов по каждой выявленной ошибке
+2. Анализ ошибок — определение возможных причин и предложение вариантов решения
+3. Мониторинг тенденций — выявление повторяющихся типов ошибок и проблемных участков кода
+4. Формирование рекомендаций — создание рекомендаций по улучшению качества кода
+
+6.2 Процесс взаимодействия с ИИ-помощником
+
+' Интеграция ИИ-помощника в обработку ошибок
+Public Sub HandleErrorWithAI(ByVal ErrorNumber As Long, _
+                            ByVal ErrorDescription As String, _
+                            ByVal Source As String, _
+                            ByVal LineNumber As Long)
+    
+    ' Логирование ошибки
+    GetLogger.Log_Error "Ошибка #" & ErrorNumber & ": " & ErrorDescription & _
+                        " в " & Source & ", строка " & LineNumber, "AIErrorHandler"
+    
+    ' Создание контекста для анализа ошибки
+    Dim context As Dictionary
+    Set context = CreateErrorContext(ErrorNumber, ErrorDescription, Source, LineNumber)
+    
+    ' Получение исходного кода процедуры с ошибкой
+    Dim sourceCode As String
+    sourceCode = GetProcedureSourceCode(Source)
+    
+    ' Анализ ошибки с помощью ИИ
+    Dim aiAnalysis As Dictionary
+    Set aiAnalysis = AIAnalyzeError(ErrorNumber, ErrorDescription, sourceCode, context)
+    
+    ' Создание паспорта ошибки на основе анализа ИИ
+    CreateErrorPassportFromAIAnalysis ErrorNumber, ErrorDescription, Source, LineNumber, aiAnalysis
+    
+    ' Вывод рекомендаций пользователю
+    DisplayAIRecommendations aiAnalysis
+End Sub
+
+' Создание контекста для анализа ошибки
+Private Function CreateErrorContext(ByVal ErrorNumber As Long, _
+                                  ByVal ErrorDescription As String, _
+                                  ByVal Source As String, _
+                                  ByVal LineNumber As Long) As Dictionary
+    
+    Dim context As New Dictionary
+    
+    ' Базовая информация об ошибке
+    context.Add "ErrorNumber", ErrorNumber
+    context.Add "ErrorDescription", ErrorDescription
+    context.Add "Source", Source
+    context.Add "LineNumber", LineNumber
+    context.Add "Timestamp", Now
+    context.Add "UserName", Environ("USERNAME")
+    
+    ' Технический контекст
+    context.Add "ExcelVersion", Application.Version
+    context.Add "AppVersion", GetAppVersion()
+    context.Add "OperatingSystem", GetWindowsVersion()
+    
+    ' Информация о последних ошибках
+    context.Add "RecentErrors", GetRecentErrorsInfo()
+    
+    ' Данные об использовании процедуры
+    context.Add "ProcedureCallingPattern", GetProcedureCallingPattern(Source)
+    
+    Set CreateErrorContext = context
+End Function
+
+' Имитация получения исходного кода процедуры
+Private Function GetProcedureSourceCode(ByVal Source As String) As String
+    ' В реальном приложении можно использовать VBIDE API для получения исходного кода
+    ' Здесь приведена упрощенная имитация
+    
+    GetProcedureSourceCode = "Public Sub SomeProcedure()" & vbCrLf & _
+                            "    Dim i As Integer" & vbCrLf & _
+                            "    For i = 0 To 10" & vbCrLf & _
+                            "        ' Код с ошибкой" & vbCrLf & _
+                            "    Next i" & vbCrLf & _
+                            "End Sub"
+End Function
+
+' Имитация анализа ошибки с помощью ИИ
+Private Function AIAnalyzeError(ByVal ErrorNumber As Long, _
+                              ByVal ErrorDescription As String, _
+                              ByVal SourceCode As String, _
+                              ByVal Context As Dictionary) As Dictionary
+    
+    ' Эта функция должна отправлять данные в ИИ-сервис и получать результаты анализа
+    ' Здесь приведена упрощенная имитация
+    
+    Dim analysis As New Dictionary
+    
+    ' Имитация определения причины ошибки
+    Select Case ErrorNumber
+        Case 9  ' Индекс вне диапазона
+            analysis.Add "ErrorCause", "Цикл начинается с индекса 0, но массив может быть определен с индекса 1."
+            analysis.Add "FixMethod", "Использовать LBound и UBound для определения границ массива."
+            analysis.Add "FixCode", "For i = LBound(array) To UBound(array)"
+            analysis.Add "FixDescription", "Замена явных границ цикла на динамические границы массива."
+            analysis.Add "SuccessRate", 95# ' Процент успеха для этого типа исправления
+            
+        Case 91  ' Объект не установлен
+            analysis.Add "ErrorCause", "Обращение к объекту, который не был инициализирован или был уничтожен."
+            analysis.Add "FixMethod", "Добавить проверку на Nothing перед использованием объекта."
+            analysis.Add "FixCode", "If Not obj Is Nothing Then"
+            analysis.Add "FixDescription", "Добавление защитной проверки перед использованием объекта."
+            analysis.Add "SuccessRate", 90# ' Процент успеха для этого типа исправления
+            
+        Case Else
+            analysis.Add "ErrorCause", "Требуется дополнительный анализ кода для определения причины."
+            analysis.Add "FixMethod", "Проверьте значение переменных в точке возникновения ошибки."
+            analysis.Add "FixCode", "On Error Resume Next" & vbCrLf & "Debug.Print var1, var2" & vbCrLf & "On Error GoTo 0"
+            analysis.Add "FixDescription", "Добавление отладочного вывода для анализа состояния переменных."
+            analysis.Add "SuccessRate", 60# ' Процент успеха для этого типа исправления
+    End Select
+    
+    Set AIAnalyzeError = analysis
+End Function
+
+' Создание паспорта ошибки на основе анализа ИИ
+Private Sub CreateErrorPassportFromAIAnalysis(ByVal ErrorNumber As Long, _
+                                            ByVal ErrorDescription As String, _
+                                            ByVal Source As String, _
+                                            ByVal LineNumber As Long, _
+                                            ByVal AIAnalysis As Dictionary)
+    
+    ' Определение статуса исправления
+    Dim successful As Boolean
+    successful = (AIAnalysis("SuccessRate") > 80)
+    
+    ' Создание паспорта
+    CreateErrorPassport ErrorNumber, ErrorDescription, Source, _
+                       AIAnalysis("ErrorCause"), _
+                       AIAnalysis("FixMethod") & vbCrLf & AIAnalysis("FixCode"), _
+                       AIAnalysis("FixDescription") & vbCrLf & _
+                       "Вероятность успеха: " & AIAnalysis("SuccessRate") & "%", _
+                       successful
+End Sub
+
+' Вывод рекомендаций пользователю
+Private Sub DisplayAIRecommendations(ByVal AIAnalysis As Dictionary)
+    ' Формирование сообщения с рекомендациями
+    Dim message As String
+    message = "Анализ ошибки:" & vbCrLf & vbCrLf
+    message = message & "Возможная причина: " & AIAnalysis("ErrorCause") & vbCrLf & vbCrLf
+    message = message & "Рекомендуемое исправление:" & vbCrLf & AIAnalysis("FixMethod") & vbCrLf & vbCrLf
+    message = message & "Пример кода:" & vbCrLf & AIAnalysis("FixCode") & vbCrLf & vbCrLf
+    message = message & "Вероятность успеха: " & AIAnalysis("SuccessRate") & "%"
+    
+    ' Вывод сообщения пользователю
+    MsgBox message, vbInformation, "Рекомендации по исправлению ошибки"
+    
+    ' Логирование вывода рекомендаций
+    GetLogger.Log_Info "Выведены рекомендации ИИ по исправлению ошибки", "AIErrorHandler"
+End Sub
+
+Заключение
+
+Представленный регламент по исправлению ошибок дополняет существующие регламенты по предотвращению и обработке ошибок, формируя комплексный подход к управлению качеством кода в VBA-приложениях. Ключевыми элементами эффективного исправления ошибок являются:
+
+1. Системный анализ — рассмотрение ошибки в контексте всей архитектуры приложения
+2. Документирование — создание подробных паспортов ошибок для каждой выявленной проблемы
+3. Тщательное тестирование — проверка исправлений на всех возможных входных данных
+4. Непрерывное улучшение — анализ тенденций и формирование рекомендаций на основе накопленного опыта
+5. Применение ИИ — использование ИИ-помощника для автоматизации процесса анализа и исправления ошибок
+
+Регулярное применение данного регламента позволит не только эффективно устранять возникающие ошибки, но и постоянно повышать качество кода, снижая вероятность появления новых проблем в будущем.

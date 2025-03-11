@@ -1,0 +1,489 @@
+#РЕГЛАМЕНТ ПО ПОСТРОЕНИЮ СТРУКТУРЫ КОДА В VBA-ПРИЛОЖЕНИЯХ
+
+1. Основные принципы структурирования кода
+
+1.1 Фундаментальный принцип
+
+Структура кода должна следовать главному принципу: код должен делать то, что говорит, и говорить то, что делает. Каждый другой аспект структурирования кода вытекает из этого базового принципа.
+
+1.2 Современный подход к структурированию
+
+Современные методики программирования ориентированы на читаемость и понятность кода, в противовес устаревшим подходам, направленным на упрощение процесса написания:
+
+Устаревшие практики (избегать): неявные типы, неявные модификаторы, неявные преобразования типов, неявные вызовы методов, сокращённые имена идентификаторов.
+Современные практики (применять): явное указание типов, явные модификаторы, структурированное разделение обязанностей, семантически значимые имена, чёткое разделение ответственности.
+
+1.3 Принципы структурной организации
+
+DRY (Don't Repeat Yourself) - избегайте дублирования кода.
+KISS (Keep It Simple, Stupid) - поддерживайте простоту решений.
+SOLID для ООП-компонентов:
+S (Single Responsibility) - каждый класс имеет одну ответственность.
+O (Open/Closed) - открыт для расширения, закрыт для модификации.
+L (Liskov Substitution) - объекты должны быть заменяемы их подтипами.
+I (Interface Segregation) - много специализированных интерфейсов лучше одного общего.
+D (Dependency Inversion) - зависимость от абстракций, а не от конкретных реализаций.
+
+2. Организация проекта и архитектура
+
+2.1 Многослойная архитектура
+
+Организуйте код по принципу разделения ответственности на логические слои:
+
+1. Слой представления - пользовательский интерфейс (формы, диалоги)
+2. Слой бизнес-логики - основные алгоритмы и правила
+3. Слой доступа к данным - работа с Excel, внешними источниками, файлами
+4. Слой утилит и инфраструктуры - логирование, обработка ошибок, общие функции
+
+2.2 Структура проекта
+
+ProjectName/
+│
+├── Classes/                   # Классы бизнес-логики и модели
+│   ├── Domain/                # Основные бизнес-объекты
+│   ├── Services/              # Сервисные классы
+│   └── Repositories/          # Классы для доступа к данным
+│
+├── Modules/                   # Стандартные модули
+│   ├── Constants.bas          # Глобальные константы
+│   ├── ErrorHandling.bas      # Централизованная обработка ошибок
+│   ├── Utilities.bas          # Общие утилиты
+│   └── EntryPoints.bas        # Публичные точки входа (макросы)
+│
+├── Forms/                     # Пользовательские формы
+│   ├── MainForm.frm           # Основная форма
+│   └── DialogForm.frm         # Диалоговые формы
+│
+└── ThisWorkbook.cls           # Код рабочей книги
+
+2.3 Макросы и точки входа
+
+Организуйте публичные точки входа (макросы) в отдельный модуль:
+
+' Модуль EntryPoints.bas
+Option Explicit
+
+' Точка входа для процесса обработки данных
+Public Sub ProcessData()
+    On Error GoTo ErrorHandler
+    
+    ' Инициализация логгера
+    InitializeLogger
+    
+    ' Делегирование основной логики отдельному модулю
+    DataProcessor.Process
+    
+    Exit Sub
+ErrorHandler:
+    HandleError Err.Number, Err.Description, "EntryPoints.ProcessData", Erl
+End Sub
+
+3. Структура модулей и классов
+
+3.1 Структура стандартного модуля
+
+' Модуль типовой структуры
+Option Explicit
+
+' Константы модуля
+Private Const MODULE_NAME As String = "ModuleName"
+
+' Объявления переменных на уровне модуля
+Private mConfig As Dictionary
+
+' Инициализация модуля (если необходима)
+Private Sub InitModule()
+    ' Код инициализации...
+End Sub
+
+' Публичные процедуры в верхней части модуля
+Public Function DoSomething() As Boolean
+    ' Код высокого уровня абстракции
+    ' Делегирование деталей приватным вспомогательным процедурам
+End Function
+
+' Приватные вспомогательные процедуры в нижней части
+Private Function ProcessItem(ByVal Item As Variant) As Boolean
+    ' Код более низкого уровня абстракции
+End Function
+
+3.2 Структура класса
+
+' Класс типовой структуры
+Option Explicit
+
+' Использование Private Type для инкапсуляции состояния
+Private Type TClassState
+    ID As String
+    Name As String
+    IsActive As Boolean
+    CreatedAt As Date
+End Type
+
+' Единая переменная для хранения состояния
+Private This As TClassState
+
+' Метод инициализации (аналог конструктора)
+Public Function Create(ByVal ID As String, ByVal Name As String) As ClassName
+    ' Валидация входных данных (защитные условия)
+    If Len(Trim(ID)) = 0 Then
+        Err.Raise ERR_INVALID_INPUT, "ClassName.Create", "ID не может быть пустым"
+    End If
+    
+    ' Инициализация свойств
+    This.ID = ID
+    This.Name = Name
+    This.IsActive = True
+    This.CreatedAt = Now
+    
+    ' Возврат ссылки на текущий экземпляр
+    Set Create = Me
+End Function
+
+' Свойства с валидацией при установке
+Public Property Get ID() As String
+    ID = This.ID
+End Property
+
+Public Property Let ID(ByVal Value As String)
+    ' Валидация и установка значения
+    If Len(Trim(Value)) = 0 Then
+        Err.Raise ERR_INVALID_INPUT, "ClassName.ID", "ID не может быть пустым"
+    End If
+    This.ID = Value
+End Property
+
+' Методы класса
+Public Function DoSomething() As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Основной код метода
+    
+    DoSomething = True
+    Exit Function
+    
+ErrorHandler:
+    LogError Err.Number, Err.Description, "ClassName.DoSomething", Erl
+    DoSomething = False
+End Function
+
+3.3 Уровни абстракции
+
+Организуйте код с учётом уровней абстракции:
+
+1. Высокий уровень - верхние публичные функции, описывающие "что" делается
+2. Средний уровень - вспомогательные функции, детализирующие логику
+3. Низкий уровень - конкретные операции, описывающие "как" делается
+
+4. Именование и форматирование
+
+4.1 Соглашения об именовании
+
+PascalCase для имён модулей, классов, публичных методов, свойств и процедур
+camelCase для локальных переменных и параметров (опционально)
+Используйте полные, описательные имена, которые можно произнести
+Избегайте:
+Удаления гласных
+Венгерской нотации (префиксов типа)
+Нумерованных переменных вместо массивов
+Подчёркиваний в идентификаторах
+
+4.2 Примеры именования
+
+' Хорошо:
+Public Function CalculateOrderTotal(ByVal OrderItems As Collection) As Currency
+
+' Плохо:
+Public Function CalcOrdTtl(ByVal itms As Collection) As Currency
+
+4.3 Именование по типу компонента
+
+Процедуры и функции: глагол + существительное (ProcessOrder, CalculateTotal)
+Свойства: существительное или прилагательное + существительное (CustomerName, IsActive)
+Классы и модули: существительное или прилагательное + существительное (CustomerService, DataProcessor)
+Интерфейсы: префикс "I" + существительное (ILogger, IDataProcessor)
+
+4.4 Форматирование кода
+
+Используйте отступы в 4 пробела для вложенных блоков кода
+Ограничивайте длину строки примерно 80 символами
+Отделяйте логические блоки кода пустой строкой
+Выравнивайте связанные объявления для улучшения читаемости
+
+' Пример форматирования:
+Private Function ProcessItems(ByVal Items As Collection, _
+                             ByVal Options As Dictionary, _
+                             Optional ByVal IgnoreErrors As Boolean = False) As Boolean
+    Dim Item        As Variant
+    Dim ItemCount   As Long
+    Dim SuccessRate As Double
+    
+    ' Первый логический блок
+    ItemCount = Items.Count
+    If ItemCount = 0 Then
+        LogWarning "Передана пустая коллекция", "ProcessItems"
+        ProcessItems = True  ' Считаем пустую коллекцию успешно обработанной
+        Exit Function
+    End If
+    
+    ' Второй логический блок - обработка элементов
+    Dim SuccessCount As Long
+    For Each Item In Items
+        If ProcessSingleItem(Item, Options) Then
+            SuccessCount = SuccessCount + 1
+        ElseIf Not IgnoreErrors Then
+            ProcessItems = False
+            Exit Function
+        End If
+    Next Item
+    
+    ' Третий логический блок - анализ результатов
+    SuccessRate = SuccessCount / ItemCount
+    ProcessItems = (SuccessRate >= 0.9)  ' Успех, если 90% элементов обработано
+End Function
+
+5. Декларации и область видимости
+
+5.1 Объявление переменных
+
+Всегда используйте Option Explicit во всех модулях
+Объявляйте переменные максимально близко к месту их использования
+Явно указывайте тип для всех переменных, даже если это Variant
+Инициализируйте переменные значимыми начальными значениями
+
+' Хорошо:
+Dim Customer As CustomerData
+Set Customer = Customers.FindById(CustomerID)
+
+' Плохо (слишком далеко от использования):
+Dim Result As Boolean, i As Long, data As Variant
+' ... 50 строк кода ...
+For i = 1 To 10
+    ' Использование i
+Next i
+
+5.2 Область видимости переменных
+
+Предпочитайте локальную область видимости: процедурный уровень вместо модульного
+Используйте модульный уровень только для состояния, которое действительно должно сохраняться
+Передавайте данные через параметры вместо использования глобальных переменных
+Минимизируйте использование публичных переменных на уровне модуля
+
+5.3 Константы и перечисления
+
+Организуйте логически связанные константы в перечисления или группируйте их в модулях констант:
+
+' Модуль констант
+Public Enum LogLevel
+    LogDebug = 0
+    LogInfo = 1
+    LogWarning = 2
+    LogError = 3
+    LogCritical = 4
+End Enum
+
+' Коды ошибок по категориям
+Public Const ERR_BASE_VALIDATION As Long = 10000
+Public Const ERR_INVALID_INPUT As Long = ERR_BASE_VALIDATION + 1
+Public Const ERR_INVALID_FORMAT As Long = ERR_BASE_VALIDATION + 2
+
+
+6. Организация зависимостей между компонентами
+
+6.1 Инверсия зависимостей
+
+Используйте абстракции (интерфейсы) для уменьшения связанности компонентов:
+
+' Интерфейс для логгера
+' ILogger.cls
+Option Explicit
+
+Public Sub LogInfo(ByVal Message As String, Optional ByVal Source As String)
+End Sub
+
+Public Sub LogError(ByVal Message As String, Optional ByVal Source As String)
+End Sub
+
+' Реализация логгера для файла
+' FileLogger.cls
+Implements ILogger
+
+Private Sub ILogger_LogInfo(ByVal Message As String, Optional ByVal Source As String)
+    ' Запись в файл...
+End Sub
+
+' Класс, использующий логгер через интерфейс
+' DataProcessor.cls
+Private mLogger As ILogger
+
+Public Sub SetLogger(ByVal Logger As ILogger)
+    Set mLogger = Logger
+End Sub
+
+Public Sub Process()
+    mLogger.LogInfo "Начало обработки", "DataProcessor.Process"
+    ' ...
+End Sub
+
+
+6.2 Инъекция зависимостей
+
+В VBA нет встроенного механизма инъекции зависимостей, но можно реализовать аналогичную функциональность:
+
+' Фабрика для конфигурации приложения
+' Application.cls
+Option Explicit
+
+' Объект-синглтон
+Private Type TAppState
+    Logger As ILogger
+    ErrorHandler As ErrorHandler
+    Configuration As Dictionary
+End Type
+
+Private This As TAppState
+
+' Инициализация приложения (аналог точки компоновки)
+Public Sub Initialize()
+    ' Создание и настройка логгера
+    Dim Logger As New FileLogger
+    Logger.Configure App.Path & "\logs\"
+    Set This.Logger = Logger
+    
+    ' Создание обработчика ошибок
+    Dim ErrorHandler As New ErrorHandler
+    ErrorHandler.Configure True, True, True
+    Set This.ErrorHandler = ErrorHandler
+    
+    ' Загрузка конфигурации
+    Set This.Configuration = LoadConfiguration()
+End Sub
+
+' Методы доступа к компонентам приложения
+Public Property Get Logger() As ILogger
+    Set Logger = This.Logger
+End Property
+
+Public Property Get ErrorHandler() As ErrorHandler
+    Set ErrorHandler = This.ErrorHandler
+End Property
+
+7. Комментирование и документация
+
+7.1 Структура комментариев
+
+Комментарии должны объяснять "почему", а не "что" делает код
+Избегайте очевидных комментариев, которые дублируют код
+Используйте стандартный формат для документирования кода:
+
+'@Description "Рассчитывает итоговую стоимость заказа с учётом скидок и налогов"
+'@Param OrderItems Коллекция товаров в заказе
+'@Param ApplyDiscount Указывает, применять ли скидки
+'@Returns Итоговая стоимость заказа с учётом всех расчётов
+Public Function CalculateOrderTotal(ByVal OrderItems As Collection, _
+                                   Optional ByVal ApplyDiscount As Boolean = True) As Currency
+    ' Код функции...
+End Function
+
+7.2 Документирование интерфейсов и контрактов
+
+Четко документируйте контракты между компонентами:
+
+'@Interface
+'@Description "Интерфейс для компонентов, обрабатывающих данные"
+' IDataProcessor.cls
+Option Explicit
+
+'@Description "Обрабатывает входные данные и возвращает результат обработки"
+'@Precondition InputData не может быть Nothing
+'@Precondition InputData должен содержать поля ID, Name и Value
+'@Returns True при успешной обработке, False при ошибке
+Public Function ProcessData(ByVal InputData As Dictionary) As Boolean
+End Function
+
+8. Модульное тестирование
+
+8.1 Структура тестов
+
+Организуйте тесты в отдельные модули с ясной структурой:
+
+'@TestModule
+'@Description "Тесты для модуля OrderProcessor"
+Option Explicit
+
+'@TestMethod
+Public Sub TestCalculateOrderTotal_StandardCase()
+    On Error GoTo TestFail
+    
+    ' Arrange
+    Dim OrderItems As New Collection
+    OrderItems.Add CreateOrderItem("Product1", 100, 2)
+    OrderItems.Add CreateOrderItem("Product2", 50, 1)
+    
+    ' Act
+    Dim Result As Currency
+    Result = OrderProcessor.CalculateOrderTotal(OrderItems, True)
+    
+    ' Assert
+    Assert.AreEqual 250#, Result, "Итоговая сумма должна быть 250"
+    Exit Sub
+    
+TestFail:
+    Assert.Fail "Тест вызвал ошибку: #" & Err.Number & " - " & Err.Description
+End Sub
+
+' Вспомогательная функция для создания тестовых данных
+Private Function CreateOrderItem(ByVal ProductName As String, _
+                              ByVal Price As Currency, _
+                              ByVal Quantity As Long) As Dictionary
+    Dim Item As New Dictionary
+    Item.Add "ProductName", ProductName
+    Item.Add "Price", Price
+    Item.Add "Quantity", Quantity
+    Set CreateOrderItem = Item
+End Function
+
+8.2 Организация тестовых данных
+
+Создавайте тестовые данные в специальных вспомогательных методах
+Используйте понятные имена для тестовых сценариев
+Следуйте схеме "Arrange-Act-Assert" для структурирования тестов
+
+9. Практические рекомендации
+
+9.1 Процедурное программирование
+
+Один макрос/сценарий на модуль
+Публичная процедура сверху, далее приватные процедуры по понижению уровня абстракции
+Избегайте управления потоком выполнения через обработку ошибок
+Избегайте глобальных переменных, предпочитайте передачу параметров
+
+9.2 Объектно-ориентированное программирование
+
+Используйте классы для инкапсуляции связанной логики и данных
+Предпочитайте композицию наследованию (которое в VBA ограничено)
+Используйте паттерны проектирования, особенно:
+Factory Method (фабричный метод)
+Singleton (одиночка)
+Repository (репозиторий)
+Strategy (стратегия)
+Используйте интерфейсы для разделения зависимостей
+
+9.3 Рефакторинг и улучшение кода
+
+Регулярно проводите рефакторинг кода для улучшения структуры
+Выделяйте общие функции в отдельные модули
+Разбивайте длинные методы на более мелкие с ясной ответственностью
+Используйте инструменты анализа кода (например, Rubberduck) для выявления проблем
+
+10. Заключение
+
+Структурирование кода в VBA-приложениях является ключевым фактором для создания надёжного, поддерживаемого и расширяемого решения. Следуя этому регламенту, вы обеспечите:
+
+1. Высокую читаемость и понятность кода
+2. Чёткое разделение ответственности
+3. Эффективную обработку ошибок и устойчивость системы
+4. Простоту поддержки и расширения функциональности
+5. Возможность модульного тестирования
+
+Данный регламент следует рассматривать как рекомендации, а не жёсткие правила. Адаптируйте его под конкретные потребности проекта, сохраняя общий принцип: писать код, который делает то, что говорит, и говорит то, что делает.
