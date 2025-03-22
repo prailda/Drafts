@@ -1,0 +1,656 @@
+' ===============================================================================
+' CommandProcessor - компонент для централизованного выполнения команд
+' -------------------------------------------------------------------------------
+' Обеспечивает выполнение команд, управление историей выполнения и отмены,
+' а также предоставляет механизмы для транзакционного выполнения.
+' ===============================================================================
+Option Explicit
+
+' Состояние процессора
+Private Type CommandProcessorState
+    Registry As Object               ' Ссылка на Registry
+    EventBus As Object               ' Ссылка на EventBus
+    CommandHistory As Object         ' Collection выполненных команд
+    UndoHistory As Object            ' Collection отмененных команд
+    InTransaction As Boolean         ' Флаг транзакции
+    TransactionCommands As Object    ' Collection команд в текущей транзакции
+    MaxHistorySize As Long           ' Максимальный размер истории
+    Initialized As Boolean           ' Флаг инициализации
+    ErrorHandler As Object           ' Обработчик ошибок
+End Type
+
+Private m_state As CommandProcessorState
+
+' ===============================================================================
+' Инициализация процессора
+' ===============================================================================
+Public Sub Initialize(Optional ByVal registry As Object = Nothing, _
+                      Optional ByVal eventBus As Object = Nothing, _
+                      Optional ByVal errorHandler As Object = Nothing)
+    
+    ' Предотвращаем повторную инициализацию
+    If m_state.Initialized Then Exit Sub
+    
+    ' Сохраняем ссылки на сервисы
+    Set m_state.Registry = registry
+    Set m_state.EventBus = eventBus
+    Set m_state.ErrorHandler = errorHandler
+    
+    ' Инициализируем коллекции
+    Set m_state.CommandHistory = CreateObject("System.Collections.ArrayList")
+    Set m_state.UndoHistory = CreateObject("System.Collections.ArrayList")
+    Set m_state.TransactionCommands = CreateObject("System.Collections.ArrayList")
+    
+    ' Устанавливаем параметры
+    m_state.InTransaction = False
+    m_state.MaxHistorySize = 100 ' По умолчанию храним 100 последних команд
+    
+    ' Если есть Registry, получаем размер истории из настроек
+    If Not m_state.Registry Is Nothing Then
+        If HasMethod(m_state.Registry, "GetSetting") Then
+            m_state.MaxHistorySize = m_state.Registry.GetSetting("CommandHistorySize", 100)
+        End If
+    End If
+    
+    ' Публикуем событие инициализации
+    If Not m_state.EventBus Is Nothing Then
+        If HasMethod(m_state.EventBus, "Publish") Then
+            m_state.EventBus.Publish "CommandProcessor.Initialized", Me
+        End If
+    End If
+    
+    m_state.Initialized = True
+End Sub
+
+' ===============================================================================
+' Выполнение одиночной команды
+' ===============================================================================
+Public Function ExecuteCommand(ByVal command As Object) As Boolean
+    ' Проверяем инициализацию
+    If Not m_state.Initialized Then
+        ExecuteCommand = False
+        Exit Function
+    End If
+    
+    ' Проверяем, что команда реализует интерфейс ICommand
+    If Not ImplementsICommand(command) Then
+        LogError "Command does not implement ICommand interface"
+        ExecuteCommand = False
+        Exit Function
+    End If
+    
+    ' Проверяем возможность выполнения
+    If Not command.CanExecute() Then
+        LogError "Command cannot be executed: " & command.ErrorMessage
+        ExecuteCommand = False
+        Exit Function
+    End If
+    
+    ' Обрабатываем ошибки при выполнении
+    On Error GoTo ErrorHandler
+    
+    ' Публикуем событие начала выполнения
+    PublishEvent "CommandProcessor.Executing", command
+    
+    ' Выполняем команду
+    Dim success As Boolean
+    success = command.Execute()
+    
+    ' Если выполнение успешно и мы не в транзакции, добавляем в историю
+    If success Then
+        If m_state.InTransaction Then
+            ' В транзакции добавляем в список команд транзакции
+            m_state.TransactionCommands.Add command
+        Else
+            ' Не в транзакции - добавляем в основную историю
+            AddToHistory command
+        End If
+        
+        ' Очищаем историю отмены при выполнении новой команды
+        m_state.UndoHistory.Clear
+    End If
+    
+    ' Публикуем событие о результате
+    If success Then
+        PublishEvent "CommandProcessor.Executed", command
+    Else
+        PublishEvent "CommandProcessor.Failed", command
+    End If
+    
+    ExecuteCommand = success
+    Exit Function
+    
+ErrorHandler:
+    ' Обрабатываем ошибку выполнения
+    Dim errNumber As Long
+    Dim errDescription As String
+    
+    errNumber = Err.Number
+    errDescription = Err.Description
+    
+    ' Логируем ошибку
+    LogError "Error executing command: " & errNumber & " - " & errDescription
+    
+    ' Если есть обработчик ошибок, используем его
+    If Not m_state.ErrorHandler Is Nothing Then
+        If HasMethod(m_state.ErrorHandler, "HandleError") Then
+            m_state.ErrorHandler.HandleError errNumber, "CommandProcessor", errDescription, _
+                                           "CommandProcessor", "ExecuteCommand", 0, 0, _
+                                           "Error executing command: " & command.Name
+        End If
+    End If
+    
+    ' Публикуем событие об ошибке
+    PublishEvent "CommandProcessor.Error", command
+    
+    ExecuteCommand = False
+End Function
+
+' ===============================================================================
+' Отмена последней выполненной команды
+' ===============================================================================
+Public Function UndoLastCommand() As Boolean
+    ' Проверяем инициализацию
+    If Not m_state.Initialized Then
+        UndoLastCommand = False
+        Exit Function
+    End If
+    
+    ' Проверяем, есть ли команды в истории
+    If m_state.CommandHistory.Count = 0 Then
+        UndoLastCommand = False
+        Exit Function
+    End If
+    
+    ' Нельзя отменять команды во время транзакции
+    If m_state.InTransaction Then
+        LogError "Cannot undo commands during transaction"
+        UndoLastCommand = False
+        Exit Function
+    End If
+    
+    ' Получаем последнюю команду из истории
+    Dim lastCommandIndex As Long
+    lastCommandIndex = m_state.CommandHistory.Count - 1
+    
+    Dim lastCommand As Object
+    Set lastCommand = m_state.CommandHistory(lastCommandIndex)
+    
+    ' Обрабатываем ошибки при отмене
+    On Error GoTo ErrorHandler
+    
+    ' Публикуем событие начала отмены
+    PublishEvent "CommandProcessor.Undoing", lastCommand
+    
+    ' Выполняем отмену
+    Dim success As Boolean
+    success = lastCommand.Undo()
+    
+    ' Если отмена успешна, перемещаем из истории выполнения в историю отмены
+    If success Then
+        ' Удаляем из истории выполнения
+        m_state.CommandHistory.RemoveAt lastCommandIndex
+        
+        ' Добавляем в историю отмены
+        m_state.UndoHistory.Add lastCommand
+    End If
+    
+    ' Публикуем событие о результате
+    If success Then
+        PublishEvent "CommandProcessor.Undone", lastCommand
+    Else
+        PublishEvent "CommandProcessor.UndoFailed", lastCommand
+    End If
+    
+    UndoLastCommand = success
+    Exit Function
+    
+ErrorHandler:
+    ' Обрабатываем ошибку отмены
+    Dim errNumber As Long
+    Dim errDescription As String
+    
+    errNumber = Err.Number
+    errDescription = Err.Description
+    
+    ' Логируем ошибку
+    LogError "Error undoing command: " & errNumber & " - " & errDescription
+    
+    ' Если есть обработчик ошибок, используем его
+    If Not m_state.ErrorHandler Is Nothing Then
+        If HasMethod(m_state.ErrorHandler, "HandleError") Then
+            m_state.ErrorHandler.HandleError errNumber, "CommandProcessor", errDescription, _
+                                           "CommandProcessor", "UndoLastCommand", 0, 0, _
+                                           "Error undoing command: " & lastCommand.Name
+        End If
+    End If
+    
+    ' Публикуем событие об ошибке
+    PublishEvent "CommandProcessor.UndoError", lastCommand
+    
+    UndoLastCommand = False
+End Function
+
+' ===============================================================================
+' Повтор последней отмененной команды
+' ===============================================================================
+Public Function RedoLastCommand() As Boolean
+    ' Проверяем инициализацию
+    If Not m_state.Initialized Then
+        RedoLastCommand = False
+        Exit Function
+    End If
+    
+    ' Проверяем, есть ли команды в истории отмены
+    If m_state.UndoHistory.Count = 0 Then
+        RedoLastCommand = False
+        Exit Function
+    End If
+    
+    ' Нельзя повторять команды во время транзакции
+    If m_state.InTransaction Then
+        LogError "Cannot redo commands during transaction"
+        RedoLastCommand = False
+        Exit Function
+    End If
+    
+    ' Получаем последнюю отмененную команду
+    Dim lastCommandIndex As Long
+    lastCommandIndex = m_state.UndoHistory.Count - 1
+    
+    Dim lastCommand As Object
+    Set lastCommand = m_state.UndoHistory(lastCommandIndex)
+    
+    ' Обрабатываем ошибки при повторе
+    On Error GoTo ErrorHandler
+    
+    ' Публикуем событие начала повтора
+    PublishEvent "CommandProcessor.Redoing", lastCommand
+    
+    ' Выполняем команду
+    Dim success As Boolean
+    success = lastCommand.Execute()
+    
+    ' Если выполнение успешно, перемещаем из истории отмены в историю выполнения
+    If success Then
+        ' Удаляем из истории отмены
+        m_state.UndoHistory.RemoveAt lastCommandIndex
+        
+        ' Добавляем в историю выполнения
+        AddToHistory lastCommand
+    End If
+    
+    ' Публикуем событие о результате
+    If success Then
+        PublishEvent "CommandProcessor.Redone", lastCommand
+    Else
+        PublishEvent "CommandProcessor.RedoFailed", lastCommand
+    End If
+    
+    RedoLastCommand = success
+    Exit Function
+    
+ErrorHandler:
+    ' Обрабатываем ошибку повтора
+    Dim errNumber As Long
+    Dim errDescription As String
+    
+    errNumber = Err.Number
+    errDescription = Err.Description
+    
+    ' Логируем ошибку
+    LogError "Error redoing command: " & errNumber & " - " & errDescription
+    
+    ' Если есть обработчик ошибок, используем его
+    If Not m_state.ErrorHandler Is Nothing Then
+        If HasMethod(m_state.ErrorHandler, "HandleError") Then
+            m_state.ErrorHandler.HandleError errNumber, "CommandProcessor", errDescription, _
+                                           "CommandProcessor", "RedoLastCommand", 0, 0, _
+                                           "Error redoing command: " & lastCommand.Name
+        End If
+    End If
+    
+    ' Публикуем событие об ошибке
+    PublishEvent "CommandProcessor.RedoError", lastCommand
+    
+    RedoLastCommand = False
+End Function
+
+' ===============================================================================
+' Начало транзакции - группы команд, которые выполняются как одна операция
+' ===============================================================================
+Public Function BeginTransaction() As Boolean
+    ' Проверяем инициализацию
+    If Not m_state.Initialized Then
+        BeginTransaction = False
+        Exit Function
+    End If
+    
+    ' Нельзя начать транзакцию внутри другой транзакции
+    If m_state.InTransaction Then
+        LogError "Transaction already in progress"
+        BeginTransaction = False
+        Exit Function
+    End If
+    
+    ' Очищаем список команд транзакции
+    m_state.TransactionCommands.Clear
+    
+    ' Устанавливаем флаг транзакции
+    m_state.InTransaction = True
+    
+    ' Публикуем событие начала транзакции
+    PublishEvent "CommandProcessor.TransactionBegin", Me
+    
+    BeginTransaction = True
+End Function
+
+' ===============================================================================
+' Завершение транзакции с применением всех команд
+' ===============================================================================
+Public Function CommitTransaction() As Boolean
+    ' Проверяем инициализацию
+    If Not m_state.Initialized Then
+        CommitTransaction = False
+        Exit Function
+    End If
+    
+    ' Проверяем, активна ли транзакция
+    If Not m_state.InTransaction Then
+        LogError "No transaction in progress"
+        CommitTransaction = False
+        Exit Function
+    End If
+    
+    ' Публикуем событие коммита транзакции
+    PublishEvent "CommandProcessor.TransactionCommitting", Me
+    
+    ' Добавляем все команды транзакции в основную историю
+    Dim i As Long
+    For i = 0 To m_state.TransactionCommands.Count - 1
+        Dim command As Object
+        Set command = m_state.TransactionCommands(i)
+        
+        ' Добавляем команду в историю
+        AddToHistory command
+    Next i
+    
+    ' Сбрасываем состояние транзакции
+    m_state.TransactionCommands.Clear
+    m_state.InTransaction = False
+    
+    ' Публикуем событие завершения транзакции
+    PublishEvent "CommandProcessor.TransactionCommitted", Me
+    
+    CommitTransaction = True
+End Function
+
+' ===============================================================================
+' Отмена транзакции с отменой всех выполненных команд
+' ===============================================================================
+Public Function RollbackTransaction() As Boolean
+    ' Проверяем инициализацию
+    If Not m_state.Initialized Then
+        RollbackTransaction = False
+        Exit Function
+    End If
+    
+    ' Проверяем, активна ли транзакция
+    If Not m_state.InTransaction Then
+        LogError "No transaction in progress"
+        RollbackTransaction = False
+        Exit Function
+    End If
+    
+    ' Публикуем событие отката транзакции
+    PublishEvent "CommandProcessor.TransactionRollingBack", Me
+    
+    ' Отменяем все команды в обратном порядке
+    Dim i As Long
+    For i = m_state.TransactionCommands.Count - 1 To 0 Step -1
+        Dim command As Object
+        Set command = m_state.TransactionCommands(i)
+        
+        ' Отменяем команду
+        On Error Resume Next
+        command.Undo
+        On Error GoTo 0
+    Next i
+    
+    ' Сбрасываем состояние транзакции
+    m_state.TransactionCommands.Clear
+    m_state.InTransaction = False
+    
+    ' Публикуем событие завершения отката
+    PublishEvent "CommandProcessor.TransactionRolledBack", Me
+    
+    RollbackTransaction = True
+End Function
+
+' ===============================================================================
+' Получение истории команд
+' ===============================================================================
+Public Function GetCommandHistory() As Object ' ArrayList
+    Set GetCommandHistory = m_state.CommandHistory
+End Function
+
+' ===============================================================================
+' Получение истории отмены
+' ===============================================================================
+Public Function GetUndoHistory() As Object ' ArrayList
+    Set GetUndoHistory = m_state.UndoHistory
+End Function
+
+' ===============================================================================
+' Получение списка команд текущей транзакции
+' ===============================================================================
+Public Function GetTransactionCommands() As Object ' ArrayList
+    Set GetTransactionCommands = m_state.TransactionCommands
+End Function
+
+' ===============================================================================
+' Очистка истории команд
+' ===============================================================================
+Public Sub ClearCommandHistory()
+    If Not m_state.Initialized Then Exit Sub
+    
+    ' Очищаем историю команд
+    m_state.CommandHistory.Clear
+End Sub
+
+' ===============================================================================
+' Очистка истории отмены
+' ===============================================================================
+Public Sub ClearUndoHistory()
+    If Not m_state.Initialized Then Exit Sub
+    
+    ' Очищаем историю отмены
+    m_state.UndoHistory.Clear
+End Sub
+
+' ===============================================================================
+' Проверка, находимся ли мы в транзакции
+' ===============================================================================
+Public Property Get InTransaction() As Boolean
+    InTransaction = m_state.InTransaction
+End Property
+
+' ===============================================================================
+' Установка максимального размера истории команд
+' ===============================================================================
+Public Property Let MaxHistorySize(ByVal value As Long)
+    If value < 1 Then
+        ' Минимальный размер истории - 1
+        m_state.MaxHistorySize = 1
+    Else
+        m_state.MaxHistorySize = value
+    End If
+    
+    ' Обрезаем историю, если она превышает новый размер
+    TrimHistory
+End Property
+
+' ===============================================================================
+' Получение максимального размера истории команд
+' ===============================================================================
+Public Property Get MaxHistorySize() As Long
+    MaxHistorySize = m_state.MaxHistorySize
+End Property
+
+' ===============================================================================
+' Обработка изменения режима работы (вызывается Registry)
+' ===============================================================================
+Public Sub OnModeChange(ByVal oldMode As Long, ByVal newMode As Long)
+    ' Этот метод может быть вызван Registry при изменении режима работы
+    ' Например, можно менять максимальный размер истории в зависимости от режима
+    
+    ' В режиме отладки (3) увеличиваем историю для более полного анализа
+    If newMode = 3 Then ' dmDebug
+        MaxHistorySize = 500
+    ElseIf newMode = 2 Then ' dmDiagnostic
+        MaxHistorySize = 250
+    ElseIf newMode = 1 Then ' dmActive
+        MaxHistorySize = 100
+    Else ' dmPassive
+        MaxHistorySize = 50
+    End If
+End Sub
+
+' ===============================================================================
+' Добавление команды в историю
+' ===============================================================================
+Private Sub AddToHistory(ByVal command As Object)
+    ' Добавляем команду в историю
+    m_state.CommandHistory.Add command
+    
+    ' Обрезаем историю, если она превышает максимальный размер
+    TrimHistory
+End Sub
+
+' ===============================================================================
+' Обрезание истории команд до максимального размера
+' ===============================================================================
+Private Sub TrimHistory()
+    ' Проверяем, превышает ли история максимальный размер
+    While m_state.CommandHistory.Count > m_state.MaxHistorySize
+        ' Удаляем самую старую команду
+        m_state.CommandHistory.RemoveAt 0
+    Wend
+End Sub
+
+' ===============================================================================
+' Проверка, реализует ли объект интерфейс ICommand
+' ===============================================================================
+Private Function ImplementsICommand(ByVal obj As Object) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем наличие основных методов интерфейса ICommand
+    Dim hasExecute As Boolean
+    Dim hasUndo As Boolean
+    Dim hasName As Boolean
+    
+    hasExecute = HasMethod(obj, "Execute")
+    hasUndo = HasMethod(obj, "Undo")
+    hasName = HasProperty(obj, "Name")
+    
+    ' Объект реализует ICommand, если имеет все необходимые методы
+    ImplementsICommand = hasExecute And hasUndo And hasName
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Проверка наличия свойства у объекта
+' ===============================================================================
+Private Function HasProperty(ByVal obj As Object, ByVal propertyName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся получить свойство
+    CallByName obj, propertyName, VbGet
+    
+    ' Проверяем наличие ошибки
+    HasProperty = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Публикация события через EventBus
+' ===============================================================================
+Private Sub PublishEvent(ByVal topic As String, ByVal data As Variant)
+    ' Проверяем наличие EventBus
+    If m_state.EventBus Is Nothing Then Exit Sub
+    
+    ' Проверяем, что EventBus имеет метод Publish
+    If Not HasMethod(m_state.EventBus, "Publish") Then Exit Sub
+    
+    ' Публикуем событие
+    m_state.EventBus.Publish topic, data
+End Sub
+
+' ===============================================================================
+' Логирование ошибки
+' ===============================================================================
+Private Sub LogError(ByVal errorMessage As String)
+    ' Логируем ошибку в отладочное окно
+    Debug.Print "CommandProcessor Error: " & errorMessage
+    
+    ' Если есть Registry, проверяем уровень логирования
+    If Not m_state.Registry Is Nothing Then
+        If HasMethod(m_state.Registry, "GetSetting") Then
+            Dim logLevel As Long
+            logLevel = m_state.Registry.GetSetting("LogLevel", 1)
+            
+            ' Если уровень логирования достаточный, публикуем событие об ошибке
+            If logLevel >= 1 Then
+                PublishEvent "CommandProcessor.LogError", errorMessage
+            End If
+        End If
+    End If
+End Sub
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    ' Публикуем событие завершения работы
+    PublishEvent "CommandProcessor.Terminating", Me
+    
+    ' Освобождаем коллекции
+    If Not m_state.CommandHistory Is Nothing Then
+        m_state.CommandHistory.Clear
+        Set m_state.CommandHistory = Nothing
+    End If
+    
+    If Not m_state.UndoHistory Is Nothing Then
+        m_state.UndoHistory.Clear
+        Set m_state.UndoHistory = Nothing
+    End If
+    
+    If Not m_state.TransactionCommands Is Nothing Then
+        m_state.TransactionCommands.Clear
+        Set m_state.TransactionCommands = Nothing
+    End If
+    
+    ' Освобождаем ссылки на сервисы
+    Set m_state.Registry = Nothing
+    Set m_state.EventBus = Nothing
+    Set m_state.ErrorHandler = Nothing
+    
+    m_state.Initialized = False
+End Sub

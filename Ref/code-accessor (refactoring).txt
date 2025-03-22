@@ -1,0 +1,1225 @@
+' ===============================================================================
+' CodeAccessor - компонент для взаимодействия с VBIDE API
+' -------------------------------------------------------------------------------
+' Модуль обеспечивает программный доступ к коду VBA через VBIDE API,
+' позволяя анализировать и модифицировать код во время выполнения.
+' ===============================================================================
+Option Explicit
+
+' Необходимая библиотека:
+' Microsoft Visual Basic for Applications Extensibility 5.3
+' (References -> VBIDE)
+
+' Тип модификации кода
+Public Enum CodeModificationType
+    cmtNone = 0            ' Без модификации
+    cmtInstrument = 1      ' Инструментирование
+    cmtAnalyze = 2         ' Анализ
+    cmtRefactor = 3        ' Рефакторинг
+    cmtFix = 4             ' Исправление
+    cmtCleanup = 5         ' Очистка
+End Enum
+
+' Префикс для отметки инструментированного кода
+Private Const DEBUG_START_MARKER As String = "' ### DEBUG_START ###"
+Private Const DEBUG_END_MARKER As String = "' ### DEBUG_END ###"
+
+' Ссылка на Registry
+Private m_Registry As Object
+
+' Ссылка на EventBus
+Private m_EventBus As Object
+
+' История модификаций кода
+Private m_ModificationHistory As Object ' Dictionary(модуль => Collection(модификации))
+
+' Резервные копии модулей
+Private m_BackupCode As Object ' Dictionary(модуль => оригинальный код)
+
+' Флаг инициализации
+Private m_Initialized As Boolean
+
+' Флаг активности
+Private m_Active As Boolean
+
+' Флаг безопасного режима (только чтение)
+Private m_SafeMode As Boolean
+
+' Текущий тип модификации
+Private m_CurrentModificationType As CodeModificationType
+
+' ===============================================================================
+' Инициализация компонента
+' ===============================================================================
+Public Sub Initialize(Optional ByVal registry As Object = Nothing, _
+                      Optional ByVal eventBus As Object = Nothing)
+    If m_Initialized Then Exit Sub
+    
+    ' Инициализируем словари
+    Set m_ModificationHistory = CreateObject("Scripting.Dictionary")
+    Set m_BackupCode = CreateObject("Scripting.Dictionary")
+    
+    ' Сохраняем ссылки на зависимости
+    If Not registry Is Nothing Then
+        Set m_Registry = registry
+    End If
+    
+    If Not eventBus Is Nothing Then
+        Set m_EventBus = eventBus
+    End If
+    
+    ' По умолчанию включаем безопасный режим
+    m_SafeMode = True
+    
+    ' Устанавливаем тип модификации по умолчанию
+    m_CurrentModificationType = cmtNone
+    
+    ' Проверяем доступность VBIDE
+    If Not IsVBIDEAvailable() Then
+        LogError "VBIDE API is not available. Make sure the reference is set and security settings allow access."
+    End If
+    
+    m_Initialized = True
+    m_Active = False
+End Sub
+
+' ===============================================================================
+' Активация компонента
+' ===============================================================================
+Public Sub Activate()
+    If Not m_Initialized Then Initialize
+    
+    ' Проверяем доступность VBIDE
+    If Not IsVBIDEAvailable() Then
+        LogError "Cannot activate CodeAccessor. VBIDE API is not available."
+        Exit Sub
+    End If
+    
+    ' Подписываемся на события, если есть EventBus
+    If Not m_EventBus Is Nothing Then
+        If HasMethod(m_EventBus, "Subscribe") Then
+            m_EventBus.Subscribe Me, "CodeModification", "OnCodeModificationEvent"
+        End If
+    End If
+    
+    m_Active = True
+End Sub
+
+' ===============================================================================
+' Деактивация компонента
+' ===============================================================================
+Public Sub Deactivate()
+    ' Отписываемся от событий, если есть EventBus
+    If Not m_EventBus Is Nothing Then
+        If HasMethod(m_EventBus, "Unsubscribe") Then
+            m_EventBus.Unsubscribe Me, "CodeModification"
+        End If
+    End If
+    
+    m_Active = False
+End Sub
+
+' ===============================================================================
+' Проверка доступности VBIDE API
+' ===============================================================================
+Private Function IsVBIDEAvailable() As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся получить доступ к VBIDE
+    Dim vbe As Object
+    Set vbe = Application.VBE
+    
+    ' Проверяем наличие ошибки
+    IsVBIDEAvailable = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Получение ссылки на модуль по имени
+' ===============================================================================
+Public Function GetModuleByName(ByVal moduleName As String) As Object ' VBComponent
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then Exit Function
+    
+    ' Получаем доступ к VBIDE
+    Dim vbe As Object ' VBIDE.VBE
+    Set vbe = Application.VBE
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error accessing VBIDE: " & Err.Description
+        Exit Function
+    End If
+    
+    ' Перебираем проекты
+    Dim vbp As Object ' VBIDE.VBProject
+    For Each vbp In vbe.VBProjects
+        ' Перебираем компоненты проекта
+        Dim vbc As Object ' VBIDE.VBComponent
+        For Each vbc In vbp.VBComponents
+            ' Проверяем имя
+            If vbc.Name = moduleName Then
+                Set GetModuleByName = vbc
+                Exit Function
+            End If
+        Next vbc
+    Next vbp
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Получение списка всех модулей текущего проекта
+' ===============================================================================
+Public Function GetAllModules() As Collection
+    On Error Resume Next
+    
+    ' Создаем коллекцию для результата
+    Dim result As New Collection
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        Set GetAllModules = result
+        Exit Function
+    End If
+    
+    ' Получаем доступ к VBIDE
+    Dim vbe As Object ' VBIDE.VBE
+    Set vbe = Application.VBE
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error accessing VBIDE: " & Err.Description
+        Set GetAllModules = result
+        Exit Function
+    End If
+    
+    ' Получаем текущий проект
+    Dim vbp As Object ' VBIDE.VBProject
+    Set vbp = vbe.ActiveVBProject
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error accessing active VB project: " & Err.Description
+        Set GetAllModules = result
+        Exit Function
+    End If
+    
+    ' Перебираем компоненты проекта
+    Dim vbc As Object ' VBIDE.VBComponent
+    For Each vbc In vbp.VBComponents
+        ' Добавляем в результат
+        result.Add vbc
+    Next vbc
+    
+    Set GetAllModules = result
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Получение кода модуля
+' ===============================================================================
+Public Function GetModuleCode(ByVal moduleName As String) As String
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then Exit Function
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Получаем весь код
+    GetModuleCode = codeModule.Lines(1, codeModule.CountOfLines)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Получение кода процедуры
+' ===============================================================================
+Public Function GetProcedureCode(ByVal moduleName As String, ByVal procedureName As String) As String
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then Exit Function
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Ищем процедуру
+    Dim startLine As Long
+    Dim lineCount As Long
+    
+    startLine = codeModule.ProcStartLine(procedureName, 0) ' 0 = vbext_pk_Proc
+    lineCount = codeModule.ProcCountLines(procedureName, 0) ' 0 = vbext_pk_Proc
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error finding procedure: " & procedureName & " in module " & moduleName & _
+                 ". Error: " & Err.Description
+        Exit Function
+    End If
+    
+    ' Получаем код процедуры
+    GetProcedureCode = codeModule.Lines(startLine, lineCount)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Создание резервной копии кода модуля
+' ===============================================================================
+Public Function BackupModuleCode(ByVal moduleName As String) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        BackupModuleCode = False
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim code As String
+    code = GetModuleCode(moduleName)
+    
+    ' Проверяем, получили ли мы код
+    If Len(code) = 0 Then
+        BackupModuleCode = False
+        Exit Function
+    End If
+    
+    ' Сохраняем код в словаре
+    If m_BackupCode.Exists(moduleName) Then
+        m_BackupCode.Remove moduleName
+    End If
+    
+    m_BackupCode.Add moduleName, code
+    
+    BackupModuleCode = True
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Восстановление кода модуля из резервной копии
+' ===============================================================================
+Public Function RestoreModuleCode(ByVal moduleName As String) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        RestoreModuleCode = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие резервной копии
+    If Not m_BackupCode.Exists(moduleName) Then
+        LogError "Backup not found for module: " & moduleName
+        RestoreModuleCode = False
+        Exit Function
+    End If
+    
+    ' Получаем код из резервной копии
+    Dim code As String
+    code = m_BackupCode(moduleName)
+    
+    ' Восстанавливаем код
+    RestoreModuleCode = SetModuleCode(moduleName, code)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Установка кода модуля
+' ===============================================================================
+Public Function SetModuleCode(ByVal moduleName As String, ByVal code As String) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        SetModuleCode = False
+        Exit Function
+    End If
+    
+    ' Проверяем безопасный режим
+    If m_SafeMode Then
+        ' В безопасном режиме создаем резервную копию перед модификацией
+        If Not m_BackupCode.Exists(moduleName) Then
+            BackupModuleCode moduleName
+        End If
+    End If
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        SetModuleCode = False
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Удаляем весь код
+    If codeModule.CountOfLines > 0 Then
+        codeModule.DeleteLines 1, codeModule.CountOfLines
+    End If
+    
+    ' Вставляем новый код
+    codeModule.InsertLines 1, code
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error setting code for module: " & moduleName & ". Error: " & Err.Description
+        SetModuleCode = False
+        Exit Function
+    End If
+    
+    ' Регистрируем модификацию
+    RegisterModification moduleName, "ReplaceAll", 1, codeModule.CountOfLines, code, m_CurrentModificationType
+    
+    SetModuleCode = True
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Вставка кода в модуль
+' ===============================================================================
+Public Function InsertCode(ByVal moduleName As String, ByVal lineNumber As Long, ByVal code As String) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        InsertCode = False
+        Exit Function
+    End If
+    
+    ' Проверяем безопасный режим
+    If m_SafeMode Then
+        ' В безопасном режиме создаем резервную копию перед модификацией
+        If Not m_BackupCode.Exists(moduleName) Then
+            BackupModuleCode moduleName
+        End If
+    End If
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        InsertCode = False
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Проверяем номер строки
+    If lineNumber < 1 Or lineNumber > codeModule.CountOfLines + 1 Then
+        LogError "Invalid line number: " & lineNumber & " for module: " & moduleName
+        InsertCode = False
+        Exit Function
+    End If
+    
+    ' Вставляем код
+    codeModule.InsertLines lineNumber, code
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error inserting code for module: " & moduleName & ". Error: " & Err.Description
+        InsertCode = False
+        Exit Function
+    End If
+    
+    ' Регистрируем модификацию
+    Dim lineCount As Long
+    lineCount = Len(code) - Len(Replace(code, vbNewLine, "")) + 1
+    RegisterModification moduleName, "Insert", lineNumber, lineCount, code, m_CurrentModificationType
+    
+    InsertCode = True
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Замена кода в модуле
+' ===============================================================================
+Public Function ReplaceCode(ByVal moduleName As String, ByVal startLine As Long, _
+                           ByVal lineCount As Long, ByVal newCode As String) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        ReplaceCode = False
+        Exit Function
+    End If
+    
+    ' Проверяем безопасный режим
+    If m_SafeMode Then
+        ' В безопасном режиме создаем резервную копию перед модификацией
+        If Not m_BackupCode.Exists(moduleName) Then
+            BackupModuleCode moduleName
+        End If
+    End If
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        ReplaceCode = False
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Проверяем номер строки и количество строк
+    If startLine < 1 Or startLine > codeModule.CountOfLines Then
+        LogError "Invalid start line: " & startLine & " for module: " & moduleName
+        ReplaceCode = False
+        Exit Function
+    End If
+    
+    If lineCount < 1 Or startLine + lineCount - 1 > codeModule.CountOfLines Then
+        LogError "Invalid line count: " & lineCount & " for module: " & moduleName & " starting at line: " & startLine
+        ReplaceCode = False
+        Exit Function
+    End If
+    
+    ' Получаем старый код для регистрации модификации
+    Dim oldCode As String
+    oldCode = codeModule.Lines(startLine, lineCount)
+    
+    ' Удаляем старый код
+    codeModule.DeleteLines startLine, lineCount
+    
+    ' Вставляем новый код
+    codeModule.InsertLines startLine, newCode
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error replacing code for module: " & moduleName & ". Error: " & Err.Description
+        ReplaceCode = False
+        Exit Function
+    End If
+    
+    ' Регистрируем модификацию
+    RegisterModification moduleName, "Replace", startLine, lineCount, newCode, m_CurrentModificationType, oldCode
+    
+    ReplaceCode = True
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Удаление кода из модуля
+' ===============================================================================
+Public Function DeleteCode(ByVal moduleName As String, ByVal startLine As Long, ByVal lineCount As Long) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        DeleteCode = False
+        Exit Function
+    End If
+    
+    ' Проверяем безопасный режим
+    If m_SafeMode Then
+        ' В безопасном режиме создаем резервную копию перед модификацией
+        If Not m_BackupCode.Exists(moduleName) Then
+            BackupModuleCode moduleName
+        End If
+    End If
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        DeleteCode = False
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Проверяем номер строки и количество строк
+    If startLine < 1 Or startLine > codeModule.CountOfLines Then
+        LogError "Invalid start line: " & startLine & " for module: " & moduleName
+        DeleteCode = False
+        Exit Function
+    End If
+    
+    If lineCount < 1 Or startLine + lineCount - 1 > codeModule.CountOfLines Then
+        LogError "Invalid line count: " & lineCount & " for module: " & moduleName & " starting at line: " & startLine
+        DeleteCode = False
+        Exit Function
+    End If
+    
+    ' Получаем старый код для регистрации модификации
+    Dim oldCode As String
+    oldCode = codeModule.Lines(startLine, lineCount)
+    
+    ' Удаляем код
+    codeModule.DeleteLines startLine, lineCount
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error deleting code for module: " & moduleName & ". Error: " & Err.Description
+        DeleteCode = False
+        Exit Function
+    End If
+    
+    ' Регистрируем модификацию
+    RegisterModification moduleName, "Delete", startLine, lineCount, "", m_CurrentModificationType, oldCode
+    
+    DeleteCode = True
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Поиск текста в модуле
+' ===============================================================================
+Public Function FindTextInModule(ByVal moduleName As String, ByVal searchText As String, _
+                                Optional ByVal startLine As Long = 1, _
+                                Optional ByVal startColumn As Long = 1, _
+                                Optional ByVal endLine As Long = -1, _
+                                Optional ByVal endColumn As Long = -1, _
+                                Optional ByVal WholeWord As Boolean = False, _
+                                Optional ByVal MatchCase As Boolean = False, _
+                                Optional ByVal PatternSearch As Boolean = False) As Dictionary
+    On Error Resume Next
+    
+    ' Создаем словарь для результата
+    Dim result As New Dictionary
+    result.Add "Found", False
+    result.Add "Line", 0
+    result.Add "Column", 0
+    result.Add "Text", ""
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        Set FindTextInModule = result
+        Exit Function
+    End If
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        Set FindTextInModule = result
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Устанавливаем конечную строку, если не указана
+    If endLine = -1 Then
+        endLine = codeModule.CountOfLines
+    End If
+    
+    ' Устанавливаем конечную колонку, если не указана
+    If endColumn = -1 Then
+        ' Если это последняя строка, используем длину строки
+        If endLine = codeModule.CountOfLines Then
+            endColumn = Len(codeModule.Lines(endLine, 1))
+        Else
+            ' Иначе используем максимальное значение
+            endColumn = 32767 ' Максимальное значение для Integer
+        End If
+    End If
+    
+    ' Определяем флаги поиска
+    Dim findFlags As Long
+    findFlags = 0
+    
+    ' 1 = vbext_fmMatchCase
+    If MatchCase Then findFlags = findFlags + 1
+    
+    ' 2 = vbext_fmWholeWord
+    If WholeWord Then findFlags = findFlags + 2
+    
+    ' 4 = vbext_fmPatternSearch
+    If PatternSearch Then findFlags = findFlags + 4
+    
+    ' Ищем текст
+    Dim found As Boolean
+    Dim foundLine As Long
+    Dim foundColumn As Long
+    
+    found = codeModule.Find(searchText, startLine, startColumn, endLine, endColumn, findFlags)
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        LogError "Error finding text in module: " & moduleName & ". Error: " & Err.Description
+        Set FindTextInModule = result
+        Exit Function
+    End If
+    
+    ' Если текст найден, получаем позицию
+    If found Then
+        foundLine = startLine
+        foundColumn = startColumn
+        
+        ' Получаем текст строки для контекста
+        Dim lineText As String
+        lineText = codeModule.Lines(foundLine, 1)
+        
+        ' Заполняем результат
+        result("Found") = True
+        result("Line") = foundLine
+        result("Column") = foundColumn
+        result("Text") = lineText
+    End If
+    
+    Set FindTextInModule = result
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Инструментирование кода модуля
+' ===============================================================================
+Public Function InstrumentModuleCode(ByVal moduleName As String, _
+                                    Optional ByVal onlyProcedures As Boolean = True) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        InstrumentModuleCode = False
+        Exit Function
+    End If
+    
+    ' Проверяем безопасный режим
+    If m_SafeMode Then
+        ' В безопасном режиме создаем резервную копию перед модификацией
+        If Not m_BackupCode.Exists(moduleName) Then
+            BackupModuleCode moduleName
+        End If
+    End If
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        InstrumentModuleCode = False
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Устанавливаем тип модификации
+    m_CurrentModificationType = cmtInstrument
+    
+    ' Если инструментируем только процедуры
+    If onlyProcedures Then
+        ' Перебираем все процедуры модуля
+        Dim procName As String
+        Dim procKind As Long
+        Dim procLine As Long
+        Dim procCount As Long
+        
+        procLine = 1
+        
+        ' Ищем все процедуры
+        Do While procLine <= codeModule.CountOfLines
+            ' Получаем имя процедуры на текущей строке
+            procName = codeModule.ProcOfLine(procLine, procKind)
+            
+            ' Если нашли процедуру, инструментируем ее
+            If Len(procName) > 0 Then
+                ' Получаем начальную строку и количество строк процедуры
+                Dim procStartLine As Long
+                Dim procLineCount As Long
+                
+                procStartLine = codeModule.ProcStartLine(procName, procKind)
+                procLineCount = codeModule.ProcCountLines(procName, procKind)
+                
+                ' Инструментируем процедуру
+                InstrumentProcedure moduleName, procName, procStartLine, procLineCount, procKind
+                
+                ' Переходим к следующей процедуре
+                procLine = procStartLine + procLineCount + 1
+            Else
+                ' Переходим к следующей строке
+                procLine = procLine + 1
+            End If
+        Loop
+    Else
+        ' Инструментируем весь модуль
+        ' Это требует специфичной логики, которая зависит от конкретных требований
+        ' ...
+    End If
+    
+    ' Сбрасываем тип модификации
+    m_CurrentModificationType = cmtNone
+    
+    InstrumentModuleCode = True
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Инструментирование процедуры
+' ===============================================================================
+Private Function InstrumentProcedure(ByVal moduleName As String, ByVal procName As String, _
+                                    ByVal procStartLine As Long, ByVal procLineCount As Long, _
+                                    ByVal procKind As Long) As Boolean
+    On Error Resume Next
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        InstrumentProcedure = False
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Получаем код процедуры
+    Dim procCode As String
+    procCode = codeModule.Lines(procStartLine, procLineCount)
+    
+    ' Проверяем, не инструментирована ли уже процедура
+    If InStr(1, procCode, DEBUG_START_MARKER) > 0 Then
+        InstrumentProcedure = True
+        Exit Function
+    End If
+    
+    ' Находим первую строку с кодом после заголовка процедуры
+    Dim firstCodeLine As Long
+    firstCodeLine = procStartLine
+    
+    Dim i As Long
+    For i = 1 To 10 ' Ограничиваем поиск первыми 10 строками
+        If firstCodeLine + i <= procStartLine + procLineCount Then
+            Dim line As String
+            line = Trim(codeModule.Lines(firstCodeLine + i, 1))
+            
+            ' Пропускаем пустые строки и комментарии
+            If Len(line) > 0 And Left(line, 1) <> "'" Then
+                ' Проверяем, не содержит ли строка только конструкции Option
+                If Not (Left(line, 7) = "Option ") Then
+                    firstCodeLine = firstCodeLine + i
+                    Exit For
+                End If
+            End If
+        End If
+    Next i
+    
+    ' Генерируем код инструментирования для начала процедуры
+    Dim entryCode As String
+    entryCode = DEBUG_START_MARKER & vbNewLine & _
+                "FlagManager.SetFlag ""F" & Format(Now, "yyyymmddhhnnss") & """, """ & _
+                moduleName & "." & procName & ".Entry""" & vbNewLine & _
+                DEBUG_END_MARKER
+    
+    ' Вставляем код в начало процедуры
+    InsertCode moduleName, firstCodeLine, entryCode
+    
+    ' Находим строку перед концом процедуры
+    Dim lastCodeLine As Long
+    lastCodeLine = procStartLine + procLineCount - 1
+    
+    ' Ищем строку End Sub или End Function или Exit Sub или Exit Function
+    Dim endLine As Long
+    For i = lastCodeLine To procStartLine Step -1
+        line = Trim(codeModule.Lines(i, 1))
+        
+        ' Ищем конец процедуры
+        If line = "End Sub" Or line = "End Function" Or line = "End Property" Then
+            ' Вставляем код перед End
+            Dim exitCode As String
+            exitCode = DEBUG_START_MARKER & vbNewLine & _
+                       "FlagManager.SetFlag ""F" & Format(Now, "yyyymmddhhnnss") & """, """ & _
+                       moduleName & "." & procName & ".Exit""" & vbNewLine & _
+                       DEBUG_END_MARKER
+            
+            InsertCode moduleName, i, exitCode
+            Exit For
+        End If
+    Next i
+    
+    ' Добавляем инструментирование для всех Exit Sub, Exit Function, Exit Property
+    Dim updatedProcCode As String
+    updatedProcCode = codeModule.Lines(procStartLine, codeModule.ProcCountLines(procName, procKind))
+    
+    ' Находим все Exit
+    Dim exitPos As Long
+    Dim exitString As String
+    
+    ' Определяем строку Exit в зависимости от типа процедуры
+    Select Case procKind
+        Case 0 ' vbext_pk_Proc (Sub)
+            exitString = "Exit Sub"
+        Case 1 ' vbext_pk_Get (Property Get)
+            exitString = "Exit Property"
+        Case 2 ' vbext_pk_Let (Property Let)
+            exitString = "Exit Property"
+        Case 3 ' vbext_pk_Set (Property Set)
+            exitString = "Exit Property"
+        Case 4 ' vbext_pk_Method (Function)
+            exitString = "Exit Function"
+    End Select
+    
+    ' Ищем все Exit в процедуре
+    exitPos = InStr(1, updatedProcCode, exitString)
+    
+    While exitPos > 0
+        ' Находим номер строки с Exit
+        Dim exitLine As Long
+        Dim currentPos As Long
+        Dim lineStart As Long
+        
+        currentPos = 1
+        lineStart = 1
+        exitLine = 1
+        
+        While currentPos < exitPos
+            If Mid(updatedProcCode, currentPos, 1) = vbLf Then
+                lineStart = currentPos + 1
+                exitLine = exitLine + 1
+            End If
+            currentPos = currentPos + 1
+        Wend
+        
+        ' Вставляем код перед Exit
+        Dim exitCodeInline As String
+        exitCodeInline = DEBUG_START_MARKER & vbNewLine & _
+                         "FlagManager.SetFlag ""F" & Format(Now, "yyyymmddhhnnss") & """, """ & _
+                         moduleName & "." & procName & ".ExitPoint""" & vbNewLine & _
+                         DEBUG_END_MARKER
+        
+        InsertCode moduleName, procStartLine + exitLine - 1, exitCodeInline
+        
+        ' Обновляем код процедуры после модификации
+        updatedProcCode = codeModule.Lines(procStartLine, codeModule.ProcCountLines(procName, procKind))
+        
+        ' Ищем следующий Exit
+        exitPos = InStr(exitPos + 1, updatedProcCode, exitString)
+    Wend
+    
+    InstrumentProcedure = True
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Очистка инструментирования кода модуля
+' ===============================================================================
+Public Function CleanupInstrumentation(ByVal moduleName As String) As Boolean
+    On Error Resume Next
+    
+    ' Проверяем инициализацию и активацию
+    If Not m_Initialized Then Initialize
+    If Not m_Active Then
+        CleanupInstrumentation = False
+        Exit Function
+    End If
+    
+    ' Получаем модуль
+    Dim vbc As Object ' VBIDE.VBComponent
+    Set vbc = GetModuleByName(moduleName)
+    
+    ' Проверяем наличие модуля
+    If vbc Is Nothing Then
+        LogError "Module not found: " & moduleName
+        CleanupInstrumentation = False
+        Exit Function
+    End If
+    
+    ' Получаем код модуля
+    Dim codeModule As Object ' VBIDE.CodeModule
+    Set codeModule = vbc.CodeModule
+    
+    ' Устанавливаем тип модификации
+    m_CurrentModificationType = cmtCleanup
+    
+    ' Ищем все блоки инструментирования и удаляем их
+    Dim startMarkerPos As Dictionary
+    Dim endMarkerPos As Dictionary
+    
+    ' Ищем маркеры начала и конца инструментирования
+    Set startMarkerPos = FindTextInModule(moduleName, DEBUG_START_MARKER)
+    
+    ' Продолжаем удаление, пока находим маркеры
+    While startMarkerPos("Found")
+        ' Получаем номер строки с маркером начала
+        Dim startLine As Long
+        startLine = startMarkerPos("Line")
+        
+        ' Ищем маркер конца после маркера начала
+        Set endMarkerPos = FindTextInModule(moduleName, DEBUG_END_MARKER, startLine)
+        
+        ' Если нашли маркер конца, удаляем блок
+        If endMarkerPos("Found") Then
+            ' Получаем номер строки с маркером конца
+            Dim endLine As Long
+            endLine = endMarkerPos("Line")
+            
+            ' Удаляем блок
+            DeleteCode moduleName, startLine, endLine - startLine + 1
+            
+            ' Ищем следующий маркер начала
+            Set startMarkerPos = FindTextInModule(moduleName, DEBUG_START_MARKER)
+        Else
+            ' Не нашли маркер конца, выходим из цикла
+            Exit Do
+        End If
+    Wend
+    
+    ' Сбрасываем тип модификации
+    m_CurrentModificationType = cmtNone
+    
+    CleanupInstrumentation = True
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Регистрация модификации кода
+' ===============================================================================
+Private Sub RegisterModification(ByVal moduleName As String, ByVal modType As String, _
+                                ByVal startLine As Long, ByVal lineCount As Long, _
+                                ByVal newCode As String, ByVal modificationReason As CodeModificationType, _
+                                Optional ByVal oldCode As String = "")
+    ' Проверяем, есть ли уже история для этого модуля
+    If Not m_ModificationHistory.Exists(moduleName) Then
+        ' Создаем новую коллекцию для этого модуля
+        m_ModificationHistory.Add moduleName, CreateObject("System.Collections.ArrayList")
+    End If
+    
+    ' Создаем запись о модификации
+    Dim modification As New Dictionary
+    modification.Add "Type", modType
+    modification.Add "StartLine", startLine
+    modification.Add "LineCount", lineCount
+    modification.Add "NewCode", newCode
+    modification.Add "OldCode", oldCode
+    modification.Add "DateTime", Now
+    modification.Add "Reason", modificationReason
+    
+    ' Добавляем в историю
+    m_ModificationHistory(moduleName).Add modification
+    
+    ' Публикуем событие о модификации, если есть EventBus
+    PublishModificationEvent moduleName, modification
+End Sub
+
+' ===============================================================================
+' Публикация события о модификации кода
+' ===============================================================================
+Private Sub PublishModificationEvent(ByVal moduleName As String, ByVal modification As Dictionary)
+    ' Проверяем наличие EventBus
+    If m_EventBus Is Nothing Then Exit Sub
+    
+    ' Проверяем наличие метода Publish
+    If Not HasMethod(m_EventBus, "Publish") Then Exit Sub
+    
+    ' Создаем данные события
+    Dim eventData As New Dictionary
+    
+    ' Копируем все поля
+    eventData.Add "ModuleName", moduleName
+    eventData.Add "ModificationType", modification("Type")
+    eventData.Add "StartLine", modification("StartLine")
+    eventData.Add "LineCount", modification("LineCount")
+    eventData.Add "DateTime", modification("DateTime")
+    eventData.Add "Reason", modification("Reason")
+    
+    ' Публикуем событие
+    m_EventBus.Publish "CodeModification." & moduleName, eventData
+    
+    ' Публикуем также общее событие для всех модификаций
+    m_EventBus.Publish "CodeModification", eventData
+End Sub
+
+' ===============================================================================
+' Обработка события модификации кода
+' ===============================================================================
+Public Sub OnCodeModificationEvent(ByVal topic As String, ByVal eventData As Variant)
+    ' Этот метод вызывается при публикации события модификации кода
+    ' Реализуем при необходимости
+End Sub
+
+' ===============================================================================
+' Получение истории модификаций кода для модуля
+' ===============================================================================
+Public Function GetModificationHistory(ByVal moduleName As String) As Object ' Collection
+    ' Создаем коллекцию для результата
+    Dim result As Object
+    Set result = CreateObject("System.Collections.ArrayList")
+    
+    ' Проверяем наличие истории для этого модуля
+    If Not m_ModificationHistory.Exists(moduleName) Then
+        Set GetModificationHistory = result
+        Exit Function
+    End If
+    
+    ' Возвращаем историю
+    Set GetModificationHistory = m_ModificationHistory(moduleName)
+End Function
+
+' ===============================================================================
+' Логирование ошибки
+' ===============================================================================
+Private Sub LogError(ByVal errorMessage As String)
+    ' Если есть Registry, используем его для логирования
+    If Not m_Registry Is Nothing Then
+        If HasMethod(m_Registry, "GetSetting") Then
+            Dim logLevel As Long
+            logLevel = m_Registry.GetSetting("LogLevel", 1)
+            
+            If logLevel >= 1 Then
+                Debug.Print "ERROR: " & errorMessage
+            End If
+        End If
+    Else
+        Debug.Print "ERROR: " & errorMessage
+    End If
+    
+    ' Публикуем событие об ошибке, если есть EventBus
+    If Not m_EventBus Is Nothing Then
+        If HasMethod(m_EventBus, "Publish") Then
+            ' Создаем данные события
+            Dim eventData As New Dictionary
+            eventData.Add "Source", "CodeAccessor"
+            eventData.Add "Description", errorMessage
+            eventData.Add "DateTime", Now
+            
+            ' Публикуем событие
+            m_EventBus.Publish "Error", eventData
+        End If
+    End If
+End Sub
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся получить тип объекта
+    Dim typeName As String
+    typeName = TypeName(obj)
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Обработка изменения режима работы
+' ===============================================================================
+Public Sub OnModeChange(ByVal oldMode As Long, ByVal newMode As Long)
+    ' Этот метод вызывается Registry при изменении режима работы
+    ' Изменяем безопасный режим в зависимости от нового режима
+    Select Case newMode
+        Case 0 ' dmPassive
+            m_SafeMode = True
+        Case 1 ' dmActive
+            m_SafeMode = True
+        Case 2 ' dmDiagnostic
+            m_SafeMode = True
+        Case 3 ' dmDebug
+            m_SafeMode = False
+    End Select
+End Sub
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    If Not m_Initialized Then Exit Sub
+    
+    ' Очищаем историю модификаций
+    For Each moduleName In m_ModificationHistory.Keys
+        m_ModificationHistory(moduleName).Clear
+    Next moduleName
+    m_ModificationHistory.RemoveAll
+    Set m_ModificationHistory = Nothing
+    
+    ' Очищаем резервные копии
+    m_BackupCode.RemoveAll
+    Set m_BackupCode = Nothing
+    
+    ' Очищаем ссылки на зависимости
+    Set m_Registry = Nothing
+    Set m_EventBus = Nothing
+    
+    m_Initialized = False
+    m_Active = False
+End Sub

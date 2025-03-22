@@ -1,0 +1,581 @@
+' ===============================================================================
+' CommandRegistry - реестр доступных команд
+' -------------------------------------------------------------------------------
+' Хранит информацию о всех доступных командах, обеспечивает их создание
+' и настройку для выполнения.
+' ===============================================================================
+Option Explicit
+
+' Тип команды
+Public Enum CommandType
+    ctDiagnostic = 0     ' Диагностические команды
+    ctInstrumentation = 1 ' Команды инструментирования кода
+    ctAnalysis = 2        ' Команды анализа
+    ctErrorHandling = 3   ' Команды обработки ошибок
+    ctSystem = 4          ' Системные команды
+    ctCustom = 5          ' Пользовательские команды
+End Enum
+
+' Информация о команде
+Private Type CommandInfo
+    ClassName As String      ' Имя класса команды
+    DisplayName As String    ' Отображаемое имя
+    Description As String    ' Описание
+    CommandType As CommandType ' Тип команды
+    Factory As Object        ' Фабрика для создания команды (опционально)
+    FactoryMethod As String  ' Метод фабрики для создания команды
+    IsEnabled As Boolean     ' Флаг доступности команды
+End Type
+
+' Состояние реестра
+Private m_registry As Object           ' Ссылка на Registry
+Private m_eventBus As Object           ' Ссылка на EventBus
+Private m_commandInfos As Object       ' Dictionary(имя => CommandInfo)
+Private m_commandFactories As Object   ' Dictionary(тип => фабрика)
+Private m_initialized As Boolean       ' Флаг инициализации
+
+' ===============================================================================
+' Инициализация реестра команд
+' ===============================================================================
+Public Sub Initialize(Optional ByVal registry As Object = Nothing, _
+                      Optional ByVal eventBus As Object = Nothing)
+    
+    ' Предотвращаем повторную инициализацию
+    If m_initialized Then Exit Sub
+    
+    ' Сохраняем ссылки на сервисы
+    Set m_registry = registry
+    Set m_eventBus = eventBus
+    
+    ' Инициализируем словари
+    Set m_commandInfos = CreateObject("Scripting.Dictionary")
+    Set m_commandFactories = CreateObject("Scripting.Dictionary")
+    
+    ' Регистрируем стандартные фабрики команд
+    ' TODO: Реализовать фабрики для разных типов команд
+    
+    ' Публикуем событие инициализации
+    If Not m_eventBus Is Nothing Then
+        If HasMethod(m_eventBus, "Publish") Then
+            m_eventBus.Publish "CommandRegistry.Initialized", Me
+        End If
+    End If
+    
+    m_initialized = True
+End Sub
+
+' ===============================================================================
+' Регистрация фабрики команд определенного типа
+' ===============================================================================
+Public Function RegisterCommandFactory(ByVal commandType As CommandType, _
+                                      ByVal factory As Object, _
+                                      ByVal factoryMethod As String) As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then Initialize
+    
+    ' Проверяем наличие метода у фабрики
+    If Not HasMethod(factory, factoryMethod) Then
+        LogError "Factory does not have method: " & factoryMethod
+        RegisterCommandFactory = False
+        Exit Function
+    End If
+    
+    ' Создаем структуру для фабрики
+    Dim factoryInfo As New Dictionary
+    factoryInfo.Add "Factory", factory
+    factoryInfo.Add "Method", factoryMethod
+    
+    ' Добавляем или обновляем фабрику
+    If m_commandFactories.Exists(commandType) Then
+        m_commandFactories(commandType) = factoryInfo
+    Else
+        m_commandFactories.Add commandType, factoryInfo
+    End If
+    
+    ' Публикуем событие регистрации фабрики
+    PublishEvent "CommandRegistry.FactoryRegistered", CStr(commandType)
+    
+    RegisterCommandFactory = True
+End Function
+
+' ===============================================================================
+' Регистрация команды
+' ===============================================================================
+Public Function RegisterCommand(ByVal commandName As String, _
+                               ByVal className As String, _
+                               ByVal displayName As String, _
+                               ByVal description As String, _
+                               ByVal commandType As CommandType, _
+                               Optional ByVal factory As Object = Nothing, _
+                               Optional ByVal factoryMethod As String = "") As Boolean
+    
+    ' Проверяем инициализацию
+    If Not m_initialized Then Initialize
+    
+    ' Проверяем, не зарегистрирована ли уже команда с таким именем
+    If m_commandInfos.Exists(commandName) Then
+        LogError "Command already registered: " & commandName
+        RegisterCommand = False
+        Exit Function
+    End If
+    
+    ' Создаем информацию о команде
+    Dim info As New Dictionary
+    info.Add "ClassName", className
+    info.Add "DisplayName", displayName
+    info.Add "Description", description
+    info.Add "CommandType", commandType
+    info.Add "Factory", factory
+    info.Add "FactoryMethod", factoryMethod
+    info.Add "IsEnabled", True
+    
+    ' Добавляем в словарь
+    m_commandInfos.Add commandName, info
+    
+    ' Публикуем событие регистрации команды
+    PublishEvent "CommandRegistry.CommandRegistered", commandName
+    
+    RegisterCommand = True
+End Function
+
+' ===============================================================================
+' Создание команды по имени
+' ===============================================================================
+Public Function CreateCommand(ByVal commandName As String, _
+                             Optional ByVal params As Variant = Empty) As Object
+    
+    ' Проверяем инициализацию
+    If Not m_initialized Then Initialize
+    
+    ' Проверяем, зарегистрирована ли команда
+    If Not m_commandInfos.Exists(commandName) Then
+        LogError "Command not registered: " & commandName
+        Exit Function
+    End If
+    
+    ' Получаем информацию о команде
+    Dim info As Dictionary
+    Set info = m_commandInfos(commandName)
+    
+    ' Проверяем, включена ли команда
+    If Not info("IsEnabled") Then
+        LogError "Command is disabled: " & commandName
+        Exit Function
+    End If
+    
+    ' Создаем команду
+    Dim command As Object
+    
+    ' Если указана фабрика для этой команды, используем её
+    If Not info("Factory") Is Nothing And Len(info("FactoryMethod")) > 0 Then
+        ' Создаем через конкретную фабрику
+        Set command = CreateCommandFromFactory(info("Factory"), info("FactoryMethod"), params)
+    Else
+        ' Ищем фабрику по типу команды
+        Dim commandType As CommandType
+        commandType = info("CommandType")
+        
+        If m_commandFactories.Exists(commandType) Then
+            ' Используем фабрику для данного типа
+            Dim factoryInfo As Dictionary
+            Set factoryInfo = m_commandFactories(commandType)
+            
+            Set command = CreateCommandFromFactory(factoryInfo("Factory"), factoryInfo("Method"), params)
+        Else
+            ' Создаем напрямую через имя класса
+            Set command = CreateObjectByClassName(info("ClassName"))
+        End If
+    End If
+    
+    ' Инициализируем команду, если она реализует ICommand
+    If Not command Is Nothing Then
+        ' Проверяем наличие метода Initialize
+        If HasMethod(command, "Initialize") Then
+            ' Инициализируем команду с базовыми параметрами
+            command.Initialize info("DisplayName"), info("Description"), m_registry, m_eventBus
+            
+            ' Если есть дополнительные параметры, применяем их
+            If Not IsEmpty(params) Then
+                ApplyCommandParameters command, params
+            End If
+        End If
+    End If
+    
+    ' Публикуем событие создания команды
+    If Not command Is Nothing Then
+        PublishEvent "CommandRegistry.CommandCreated", commandName
+    End If
+    
+    Set CreateCommand = command
+End Function
+
+' ===============================================================================
+' Создание команды через фабрику
+' ===============================================================================
+Private Function CreateCommandFromFactory(ByVal factory As Object, _
+                                        ByVal factoryMethod As String, _
+                                        ByVal params As Variant) As Object
+    
+    On Error Resume Next
+    
+    Dim command As Object
+    
+    ' Вызываем метод фабрики с параметрами или без
+    If IsEmpty(params) Then
+        ' Без параметров
+        Set command = CallByName(factory, factoryMethod, VbMethod)
+    Else
+        ' С параметрами
+        Set command = CallByName(factory, factoryMethod, VbMethod, params)
+    End If
+    
+    ' Проверяем ошибки
+    If Err.Number <> 0 Then
+        LogError "Error creating command via factory: " & Err.Description
+        Set command = Nothing
+    End If
+    
+    On Error GoTo 0
+    
+    Set CreateCommandFromFactory = command
+End Function
+
+' ===============================================================================
+' Создание объекта по имени класса
+' ===============================================================================
+Private Function CreateObjectByClassName(ByVal className As String) As Object
+    On Error Resume Next
+    
+    Dim command As Object
+    
+    ' Пытаемся создать объект по имени класса
+    Set command = CreateObject(className)
+    
+    ' Если не получилось, пробуем через New
+    If Err.Number <> 0 Then
+        Err.Clear
+        
+        ' Очищаем имя класса от пробелов
+        className = Trim(className)
+        
+        ' Пытаемся создать через New - это работает только для классов проекта
+        ' Внимание: такой подход может не работать во всех средах
+        ' и может вызвать ошибки компиляции, если класс не существует
+        Select Case className
+            ' Здесь перечисляем все возможные классы команд
+            ' TODO: Добавить конкретные классы команд
+            Case "DiagnosticCommand"
+                ' Set command = New DiagnosticCommand
+            Case "InstrumentationCommand"
+                ' Set command = New InstrumentationCommand
+            Case Else
+                ' Неизвестный класс
+                LogError "Unknown command class: " & className
+                Set command = Nothing
+        End Select
+    End If
+    
+    ' Проверяем ошибки
+    If Err.Number <> 0 Then
+        LogError "Error creating command by class name: " & Err.Description
+        Set command = Nothing
+    End If
+    
+    On Error GoTo 0
+    
+    Set CreateObjectByClassName = command
+End Function
+
+' ===============================================================================
+' Применение параметров к команде
+' ===============================================================================
+Private Sub ApplyCommandParameters(ByVal command As Object, ByVal params As Variant)
+    On Error Resume Next
+    
+    ' Проверяем тип параметров
+    Select Case TypeName(params)
+        Case "Dictionary"
+            ' Если параметры в виде словаря, применяем каждый параметр
+            Dim key As Variant
+            For Each key In params.Keys
+                ' Пытаемся установить свойство
+                CallByName command, CStr(key), VbLet, params(key)
+                
+                ' Если произошла ошибка, пытаемся вызвать метод Set
+                If Err.Number <> 0 Then
+                    Err.Clear
+                    CallByName command, "Set" & CStr(key), VbMethod, params(key)
+                End If
+                
+                ' Если и это не сработало, логируем ошибку
+                If Err.Number <> 0 Then
+                    LogError "Error setting parameter " & key & ": " & Err.Description
+                    Err.Clear
+                End If
+            Next key
+            
+        Case "Collection", "ArrayList"
+            ' Если параметры в виде коллекции, применяем метод ApplyParameters
+            If HasMethod(command, "ApplyParameters") Then
+                command.ApplyParameters params
+            End If
+            
+        Case Else
+            ' Для других типов данных, пытаемся напрямую применить
+            If HasMethod(command, "ApplyParameters") Then
+                command.ApplyParameters params
+            End If
+    End Select
+    
+    On Error GoTo 0
+End Sub
+
+' ===============================================================================
+' Включение/отключение команды
+' ===============================================================================
+Public Function EnableCommand(ByVal commandName As String, ByVal enable As Boolean) As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then Initialize
+    
+    ' Проверяем, зарегистрирована ли команда
+    If Not m_commandInfos.Exists(commandName) Then
+        LogError "Command not registered: " & commandName
+        EnableCommand = False
+        Exit Function
+    End If
+    
+    ' Получаем информацию о команде и обновляем флаг
+    Dim info As Dictionary
+    Set info = m_commandInfos(commandName)
+    info("IsEnabled") = enable
+    
+    ' Публикуем событие изменения состояния команды
+    PublishEvent "CommandRegistry.CommandStateChanged", commandName
+    
+    EnableCommand = True
+End Function
+
+' ===============================================================================
+' Проверка, включена ли команда
+' ===============================================================================
+Public Function IsCommandEnabled(ByVal commandName As String) As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then Initialize
+    
+    ' Проверяем, зарегистрирована ли команда
+    If Not m_commandInfos.Exists(commandName) Then
+        IsCommandEnabled = False
+        Exit Function
+    End If
+    
+    ' Получаем информацию о команде и возвращаем флаг
+    Dim info As Dictionary
+    Set info = m_commandInfos(commandName)
+    IsCommandEnabled = info("IsEnabled")
+End Function
+
+' ===============================================================================
+' Получение информации о команде
+' ===============================================================================
+Public Function GetCommandInfo(ByVal commandName As String) As Dictionary
+    ' Проверяем инициализацию
+    If Not m_initialized Then Initialize
+    
+    ' Проверяем, зарегистрирована ли команда
+    If Not m_commandInfos.Exists(commandName) Then
+        Exit Function
+    End If
+    
+    ' Возвращаем копию информации о команде
+    Dim info As Dictionary
+    Set info = m_commandInfos(commandName)
+    
+    Dim result As New Dictionary
+    result.Add "Name", commandName
+    result.Add "ClassName", info("ClassName")
+    result.Add "DisplayName", info("DisplayName")
+    result.Add "Description", info("Description")
+    result.Add "CommandType", info("CommandType")
+    result.Add "IsEnabled", info("IsEnabled")
+    
+    Set GetCommandInfo = result
+End Function
+
+' ===============================================================================
+' Получение списка всех зарегистрированных команд
+' ===============================================================================
+Public Function GetAllCommands() As Collection
+    ' Создаем коллекцию для результата
+    Dim result As New Collection
+    
+    ' Проверяем инициализацию
+    If Not m_initialized Then Initialize
+    
+    ' Перебираем все зарегистрированные команды
+    Dim commandName As Variant
+    For Each commandName In m_commandInfos.Keys
+        ' Получаем информацию о команде
+        Dim info As Dictionary
+        Set info = GetCommandInfo(CStr(commandName))
+        
+        ' Добавляем в результат
+        result.Add info
+    Next commandName
+    
+    Set GetAllCommands = result
+End Function
+
+' ===============================================================================
+' Получение списка команд определенного типа
+' ===============================================================================
+Public Function GetCommandsByType(ByVal commandType As CommandType) As Collection
+    ' Создаем коллекцию для результата
+    Dim result As New Collection
+    
+    ' Проверяем инициализацию
+    If Not m_initialized Then Initialize
+    
+    ' Перебираем все зарегистрированные команды
+    Dim commandName As Variant
+    For Each commandName In m_commandInfos.Keys
+        ' Получаем информацию о команде
+        Dim info As Dictionary
+        Set info = m_commandInfos(commandName)
+        
+        ' Проверяем тип
+        If info("CommandType") = commandType Then
+            ' Добавляем в результат
+            result.Add GetCommandInfo(CStr(commandName))
+        End If
+    Next commandName
+    
+    Set GetCommandsByType = result
+End Function
+
+' ===============================================================================
+' Обработка изменения режима работы (вызывается Registry)
+' ===============================================================================
+Public Sub OnModeChange(ByVal oldMode As Long, ByVal newMode As Long)
+    ' Этот метод может быть вызван Registry при изменении режима работы
+    ' Например, можно включать/отключать определенные команды в зависимости от режима
+    
+    ' Получаем все команды
+    Dim commands As Collection
+    Set commands = GetAllCommands()
+    
+    ' Перебираем команды и включаем/отключаем их в зависимости от режима
+    Dim i As Long
+    For i = 1 To commands.Count
+        Dim info As Dictionary
+        Set info = commands(i)
+        
+        Dim commandName As String
+        commandName = info("Name")
+        
+        Dim commandType As CommandType
+        commandType = info("CommandType")
+        
+        ' Включаем/отключаем команды в зависимости от режима и типа
+        Select Case commandType
+            Case ctDiagnostic
+                ' Диагностические команды включены в режимах dmActive и выше
+                EnableCommand commandName, (newMode >= 1)
+                
+            Case ctInstrumentation
+                ' Команды инструментирования включены в режимах dmDiagnostic и выше
+                EnableCommand commandName, (newMode >= 2)
+                
+            Case ctAnalysis
+                ' Команды анализа включены в режимах dmDiagnostic и выше
+                EnableCommand commandName, (newMode >= 2)
+                
+            Case ctErrorHandling
+                ' Команды обработки ошибок всегда включены
+                EnableCommand commandName, True
+                
+            Case ctSystem
+                ' Системные команды всегда включены
+                EnableCommand commandName, True
+                
+            Case ctCustom
+                ' Пользовательские команды включены по умолчанию
+                ' Но можно изменить это поведение
+                EnableCommand commandName, True
+        End Select
+    Next i
+End Sub
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Публикация события через EventBus
+' ===============================================================================
+Private Sub PublishEvent(ByVal topic As String, ByVal data As Variant)
+    ' Проверяем наличие EventBus
+    If m_eventBus Is Nothing Then Exit Sub
+    
+    ' Проверяем, что EventBus имеет метод Publish
+    If Not HasMethod(m_eventBus, "Publish") Then Exit Sub
+    
+    ' Публикуем событие
+    m_eventBus.Publish topic, data
+End Sub
+
+' ===============================================================================
+' Логирование ошибки
+' ===============================================================================
+Private Sub LogError(ByVal errorMessage As String)
+    ' Логируем ошибку в отладочное окно
+    Debug.Print "CommandRegistry Error: " & errorMessage
+    
+    ' Если есть Registry, проверяем уровень логирования
+    If Not m_registry Is Nothing Then
+        If HasMethod(m_registry, "GetSetting") Then
+            Dim logLevel As Long
+            logLevel = m_registry.GetSetting("LogLevel", 1)
+            
+            ' Если уровень логирования достаточный, публикуем событие об ошибке
+            If logLevel >= 1 Then
+                PublishEvent "CommandRegistry.LogError", errorMessage
+            End If
+        End If
+    End If
+End Sub
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    ' Публикуем событие завершения работы
+    PublishEvent "CommandRegistry.Terminating", Me
+    
+    ' Очищаем словари
+    If Not m_commandInfos Is Nothing Then
+        m_commandInfos.RemoveAll
+        Set m_commandInfos = Nothing
+    End If
+    
+    If Not m_commandFactories Is Nothing Then
+        m_commandFactories.RemoveAll
+        Set m_commandFactories = Nothing
+    End If
+    
+    ' Освобождаем ссылки на сервисы
+    Set m_registry = Nothing
+    Set m_eventBus = Nothing
+    
+    m_initialized = False
+End Sub

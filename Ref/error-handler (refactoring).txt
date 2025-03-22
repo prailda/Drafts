@@ -1,0 +1,957 @@
+' ===============================================================================
+' ErrorHandler - централизованная система обработки ошибок
+' -------------------------------------------------------------------------------
+' Модуль предоставляет единую точку для обработки, классификации и 
+' маршрутизации ошибок в приложении.
+' ===============================================================================
+Option Explicit
+
+' Константы для типов ошибок
+Public Enum ErrorType
+    etVBA = 0          ' Стандартная ошибка VBA
+    etApplication = 1  ' Ошибка приложения (Excel, Word и т.д.)
+    etDatabase = 2     ' Ошибка базы данных
+    etNetwork = 3      ' Сетевая ошибка
+    etSecurity = 4     ' Ошибка безопасности
+    etValidation = 5   ' Ошибка валидации данных
+    etCustom = 6       ' Пользовательская ошибка
+End Enum
+
+' Константы для уровней серьезности ошибок
+Public Enum ErrorSeverity
+    esCritical = 0    ' Критическая ошибка (требует прерывания)
+    esError = 1       ' Серьезная ошибка (может продолжить с ограничениями)
+    esWarning = 2     ' Предупреждение (можно продолжить)
+    esInfo = 3        ' Информационное сообщение
+End Enum
+
+' Константы для стратегий восстановления
+Public Enum RecoveryStrategy
+    rsNone = 0        ' Нет стратегии восстановления
+    rsRetry = 1       ' Повторить операцию
+    rsIgnore = 2      ' Игнорировать ошибку и продолжить
+    rsRollback = 3    ' Откатить изменения
+    rsAlternative = 4 ' Использовать альтернативный путь
+    rsExit = 5        ' Завершить выполнение
+end Enum
+
+' Структура для хранения информации об ошибке
+Private Type ErrorInfo
+    Number As Long                ' Номер ошибки
+    Source As String              ' Источник ошибки
+    Description As String         ' Описание ошибки
+    HelpContext As Long           ' Контекст справки
+    HelpFile As String            ' Файл справки
+    ErrorType As ErrorType        ' Тип ошибки
+    Severity As ErrorSeverity     ' Серьезность ошибки
+    ModuleName As String          ' Имя модуля
+    ProcedureName As String       ' Имя процедуры
+    LineNumber As Long            ' Номер строки
+    DateTime As Date              ' Дата и время
+    CallStack As String           ' Стек вызовов
+    VariableState As String       ' Состояние переменных
+    RecoveryStrategy As RecoveryStrategy ' Стратегия восстановления
+    UserMessage As String         ' Сообщение для пользователя
+    TechnicalDetails As String    ' Технические детали
+    IsHandled As Boolean          ' Флаг обработки ошибки
+    PassportId As String          ' Идентификатор паспорта ошибки
+End Type
+
+' Текущая информация об ошибке
+Private m_CurrentError As ErrorInfo
+
+' История ошибок (для анализа и отчетности)
+Private m_ErrorHistory As Object ' Collection
+
+' Максимальный размер истории ошибок
+Private m_MaxHistorySize As Long
+
+' Ссылка на Registry
+Private m_Registry As Object
+
+' Ссылка на EventBus
+Private m_EventBus As Object
+
+' Ссылка на PassportSystem
+Private m_PassportSystem As Object
+
+' Флаг инициализации
+Private m_Initialized As Boolean
+
+' Флаг активации
+Private m_Active As Boolean
+
+' Флаг, указывающий на обработку ошибки в данный момент
+Private m_IsHandlingError As Boolean
+
+' ===============================================================================
+' Инициализация обработчика ошибок
+' ===============================================================================
+Public Sub Initialize(Optional ByVal registry As Object = Nothing, _
+                      Optional ByVal eventBus As Object = Nothing, _
+                      Optional ByVal passportSystem As Object = Nothing)
+    If m_Initialized Then Exit Sub
+    
+    ' Инициализируем историю ошибок
+    Set m_ErrorHistory = CreateObject("System.Collections.ArrayList")
+    
+    ' Устанавливаем максимальный размер истории по умолчанию
+    m_MaxHistorySize = 100
+    
+    ' Сохраняем ссылки на зависимости
+    If Not registry Is Nothing Then
+        Set m_Registry = registry
+        
+        ' Если есть Registry, получаем размер истории из настроек
+        If HasMethod(m_Registry, "GetSetting") Then
+            m_MaxHistorySize = m_Registry.GetSetting("ErrorHistorySize", 100)
+        End If
+    End If
+    
+    If Not eventBus Is Nothing Then
+        Set m_EventBus = eventBus
+    End If
+    
+    If Not passportSystem Is Nothing Then
+        Set m_PassportSystem = passportSystem
+    End If
+    
+    ' Сбрасываем текущую ошибку
+    ResetCurrentError
+    
+    m_IsHandlingError = False
+    m_Initialized = True
+    m_Active = False
+End Sub
+
+' ===============================================================================
+' Активация обработчика ошибок
+' ===============================================================================
+Public Sub Activate()
+    If Not m_Initialized Then Initialize
+    
+    ' Подписываемся на события, если есть EventBus
+    If Not m_EventBus Is Nothing Then
+        If HasMethod(m_EventBus, "Subscribe") Then
+            m_EventBus.Subscribe Me, "Error", "OnErrorEvent"
+        End If
+    End If
+    
+    m_Active = True
+End Sub
+
+' ===============================================================================
+' Деактивация обработчика ошибок
+' ===============================================================================
+Public Sub Deactivate()
+    ' Отписываемся от событий, если есть EventBus
+    If Not m_EventBus Is Nothing Then
+        If HasMethod(m_EventBus, "Unsubscribe") Then
+            m_EventBus.Unsubscribe Me, "Error"
+        End If
+    End If
+    
+    m_Active = False
+End Sub
+
+' ===============================================================================
+' Обработка ошибки
+' ===============================================================================
+Public Function HandleError(Optional ByVal errNumber As Long = 0, _
+                            Optional ByVal errSource As String = "", _
+                            Optional ByVal errDescription As String = "", _
+                            Optional ByVal moduleName As String = "", _
+                            Optional ByVal procedureName As String = "", _
+                            Optional ByVal lineNumber As Long = 0, _
+                            Optional ByVal errType As ErrorType = etVBA, _
+                            Optional ByVal severity As ErrorSeverity = esError, _
+                            Optional ByVal userMessage As String = "", _
+                            Optional ByVal recoveryStrategy As RecoveryStrategy = rsNone) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверяем инициализацию
+    If Not m_Initialized Then Initialize
+    
+    ' Проверяем, не обрабатывается ли уже ошибка
+    If m_IsHandlingError Then
+        ' Рекурсивный вызов, предотвращаем бесконечную рекурсию
+        LogRecursiveError errNumber, errSource, errDescription
+        HandleError = False
+        Exit Function
+    End If
+    
+    ' Устанавливаем флаг обработки ошибки
+    m_IsHandlingError = True
+    
+    ' Если параметры не переданы, получаем информацию о текущей ошибке
+    If errNumber = 0 Then errNumber = Err.Number
+    If Len(errSource) = 0 Then errSource = Err.Source
+    If Len(errDescription) = 0 Then errDescription = Err.Description
+    
+    ' Заполняем информацию об ошибке
+    m_CurrentError.Number = errNumber
+    m_CurrentError.Source = errSource
+    m_CurrentError.Description = errDescription
+    m_CurrentError.HelpContext = Err.HelpContext
+    m_CurrentError.HelpFile = Err.HelpFile
+    m_CurrentError.ErrorType = errType
+    m_CurrentError.Severity = severity
+    m_CurrentError.ModuleName = moduleName
+    m_CurrentError.ProcedureName = procedureName
+    m_CurrentError.LineNumber = lineNumber
+    m_CurrentError.DateTime = Now
+    m_CurrentError.UserMessage = userMessage
+    m_CurrentError.RecoveryStrategy = recoveryStrategy
+    m_CurrentError.IsHandled = False
+    
+    ' Получаем дополнительную информацию
+    CollectAdditionalInfo
+    
+    ' Классифицируем ошибку, если тип не указан явно
+    If errType = etVBA Then
+        ClassifyError
+    End If
+    
+    ' Генерируем паспорт ошибки, если есть PassportSystem
+    GenerateErrorPassport
+    
+    ' Логируем ошибку
+    LogError
+    
+    ' Добавляем ошибку в историю
+    AddToHistory
+    
+    ' Публикуем событие об ошибке, если есть EventBus
+    PublishErrorEvent
+    
+    ' Определяем стратегию восстановления, если не указана явно
+    If recoveryStrategy = rsNone Then
+        DetermineRecoveryStrategy
+    End If
+    
+    ' Применяем стратегию восстановления
+    ApplyRecoveryStrategy
+    
+    ' Отображаем сообщение пользователю, если нужно
+    ShowUserMessage
+    
+    ' Сбрасываем флаг обработки ошибки
+    m_IsHandlingError = False
+    
+    ' Отмечаем ошибку как обработанную
+    m_CurrentError.IsHandled = True
+    
+    HandleError = True
+    Exit Function
+    
+ErrorHandler:
+    ' Произошла ошибка в обработчике ошибок!
+    LogInternalError Err.Number, Err.Description
+    
+    ' Сбрасываем флаг обработки ошибки
+    m_IsHandlingError = False
+    
+    HandleError = False
+End Function
+
+' ===============================================================================
+' Обработка события ошибки (для интеграции с EventBus)
+' ===============================================================================
+Public Sub OnErrorEvent(ByVal topic As String, ByVal eventData As Variant)
+    ' Проверяем инициализацию
+    If Not m_Initialized Then Initialize
+    
+    ' Проверяем наличие данных
+    If IsEmpty(eventData) Then Exit Sub
+    
+    ' Обрабатываем ошибку на основе данных события
+    On Error Resume Next
+    
+    Dim errNumber As Long
+    Dim errSource As String
+    Dim errDescription As String
+    Dim moduleName As String
+    Dim procedureName As String
+    Dim lineNumber As Long
+    Dim errType As ErrorType
+    Dim severity As ErrorSeverity
+    
+    ' Проверяем формат данных
+    If TypeName(eventData) = "Dictionary" Then
+        ' Получаем данные из словаря
+        If eventData.Exists("Number") Then errNumber = eventData("Number")
+        If eventData.Exists("Source") Then errSource = eventData("Source")
+        If eventData.Exists("Description") Then errDescription = eventData("Description")
+        If eventData.Exists("ModuleName") Then moduleName = eventData("ModuleName")
+        If eventData.Exists("ProcedureName") Then procedureName = eventData("ProcedureName")
+        If eventData.Exists("LineNumber") Then lineNumber = eventData("LineNumber")
+        If eventData.Exists("ErrorType") Then errType = eventData("ErrorType")
+        If eventData.Exists("Severity") Then severity = eventData("Severity")
+    End If
+    
+    ' Обрабатываем ошибку
+    HandleError errNumber, errSource, errDescription, moduleName, procedureName, lineNumber, errType, severity
+    
+    On Error GoTo 0
+End Sub
+
+' ===============================================================================
+' Сбор дополнительной информации об ошибке
+' ===============================================================================
+Private Sub CollectAdditionalInfo()
+    ' Собираем стек вызовов
+    CollectCallStack
+    
+    ' Собираем состояние переменных, если включено
+    If m_Registry Is Nothing Then
+        ' По умолчанию включено
+        CollectVariableState
+    Else
+        If HasMethod(m_Registry, "GetSetting") Then
+            If m_Registry.GetSetting("TrackVariables", True) Then
+                CollectVariableState
+            End If
+        Else
+            CollectVariableState
+        End If
+    End If
+    
+    ' Добавляем технические детали
+    m_CurrentError.TechnicalDetails = "Error occurred in " & m_CurrentError.ModuleName & "." & _
+                                     m_CurrentError.ProcedureName & " at line " & m_CurrentError.LineNumber & _
+                                     " with error number " & m_CurrentError.Number & _
+                                     " (" & m_CurrentError.Description & ")"
+End Sub
+
+' ===============================================================================
+' Сбор стека вызовов
+' ===============================================================================
+Private Sub CollectCallStack()
+    ' В VBA нет прямого доступа к стеку вызовов
+    ' Этот метод должен быть заменен конкретной реализацией
+    
+    ' Простая заглушка
+    m_CurrentError.CallStack = "Call stack not available"
+    
+    ' Если есть CallTracer, получаем стек вызовов от него
+    ' Это должно быть заменено реальной реализацией
+    ' ...
+End Sub
+
+' ===============================================================================
+' Сбор состояния переменных
+' ===============================================================================
+Private Sub CollectVariableState()
+    ' В VBA нет прямого доступа к состоянию всех переменных
+    ' Этот метод должен быть заменен конкретной реализацией
+    
+    ' Простая заглушка
+    m_CurrentError.VariableState = "Variable state not available"
+    
+    ' Если есть StateTracker, получаем состояние переменных от него
+    ' Это должно быть заменено реальной реализацией
+    ' ...
+End Sub
+
+' ===============================================================================
+' Классификация ошибки
+' ===============================================================================
+Private Sub ClassifyError()
+    ' Классифицируем ошибку на основе номера и источника
+    Select Case m_CurrentError.Number
+        ' Ошибки VBA
+        Case 1 To 999
+            m_CurrentError.ErrorType = etVBA
+            
+        ' Ошибки приложения
+        Case 32000 To 32099
+            m_CurrentError.ErrorType = etApplication
+            
+        ' Ошибки базы данных
+        Case 3000 To 3999
+            m_CurrentError.ErrorType = etDatabase
+            
+        ' Ошибки безопасности
+        Case 32500 To 32599
+            m_CurrentError.ErrorType = etSecurity
+            
+        ' Ошибки сети
+        Case 32600 To 32699
+            m_CurrentError.ErrorType = etNetwork
+            
+        ' Ошибки валидации данных
+        Case 32700 To 32799
+            m_CurrentError.ErrorType = etValidation
+            
+        ' Пользовательские ошибки
+        Case 32800 To 32999
+            m_CurrentError.ErrorType = etCustom
+            
+        ' По умолчанию - ошибка приложения
+        Case Else
+            m_CurrentError.ErrorType = etApplication
+    End Select
+    
+    ' Классифицируем серьезность ошибки, если не указана явно
+    If m_CurrentError.Severity = esError Then
+        Select Case m_CurrentError.ErrorType
+            Case etVBA
+                m_CurrentError.Severity = esError
+            Case etApplication
+                m_CurrentError.Severity = esError
+            Case etDatabase
+                If m_CurrentError.Number = 3146 Then ' Не все данные были прочитаны
+                    m_CurrentError.Severity = esWarning
+                Else
+                    m_CurrentError.Severity = esError
+                End If
+            Case etNetwork
+                m_CurrentError.Severity = esError
+            Case etSecurity
+                m_CurrentError.Severity = esCritical
+            Case etValidation
+                m_CurrentError.Severity = esWarning
+            Case etCustom
+                m_CurrentError.Severity = esError
+        End Select
+    End If
+End Sub
+
+' ===============================================================================
+' Генерация паспорта ошибки
+' ===============================================================================
+Private Sub GenerateErrorPassport()
+    ' Проверяем наличие PassportSystem
+    If m_PassportSystem Is Nothing Then
+        m_CurrentError.PassportId = "ERR" & Format(Now, "yyyymmddhhnnss") & "_" & m_CurrentError.Number
+    Else
+        ' Если есть PassportSystem, генерируем паспорт
+        If HasMethod(m_PassportSystem, "GenerateErrorPassport") Then
+            m_CurrentError.PassportId = m_PassportSystem.GenerateErrorPassport(m_CurrentError)
+        Else
+            m_CurrentError.PassportId = "ERR" & Format(Now, "yyyymmddhhnnss") & "_" & m_CurrentError.Number
+        End If
+    End If
+end Sub
+
+' ===============================================================================
+' Логирование ошибки
+' ===============================================================================
+Private Sub LogError()
+    ' Определяем, куда логировать ошибку
+    Dim logToFile As Boolean
+    logToFile = False
+    
+    If m_Registry Is Nothing Then
+        ' По умолчанию логируем в файл
+        logToFile = True
+    Else
+        If HasMethod(m_Registry, "GetSetting") Then
+            logToFile = m_Registry.GetSetting("LogToFile", True)
+        Else
+            logToFile = True
+        End If
+    End If
+    
+    ' Формируем строку лога
+    Dim logMessage As String
+    logMessage = Format(Now, "yyyy-mm-dd hh:nn:ss") & " - " & _
+                 m_CurrentError.PassportId & " - " & _
+                 GetSeverityText(m_CurrentError.Severity) & " - " & _
+                 m_CurrentError.ModuleName & "." & m_CurrentError.ProcedureName & " - " & _
+                 "Error " & m_CurrentError.Number & ": " & m_CurrentError.Description
+    
+    ' Логируем в отладочное окно
+    Debug.Print logMessage
+    
+    ' Логируем в файл, если нужно
+    If logToFile Then
+        LogToFile logMessage
+    End If
+End Sub
+
+' ===============================================================================
+' Логирование в файл
+' ===============================================================================
+Private Sub LogToFile(ByVal message As String)
+    On Error Resume Next
+    
+    ' Определяем путь к файлу лога
+    Dim logFilePath As String
+    
+    If m_Registry Is Nothing Then
+        ' По умолчанию логируем в файл в текущей директории
+        logFilePath = ThisWorkbook.Path & "\ErrorLog.txt"
+    Else
+        If HasMethod(m_Registry, "GetSetting") Then
+            logFilePath = m_Registry.GetSetting("LogFilePath", ThisWorkbook.Path & "\ErrorLog.txt")
+        Else
+            logFilePath = ThisWorkbook.Path & "\ErrorLog.txt"
+        End If
+    End If
+    
+    ' Открываем файл для добавления
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    
+    Open logFilePath For Append As #fileNum
+    Print #fileNum, message
+    Close #fileNum
+    
+    On Error GoTo 0
+End Sub
+
+' ===============================================================================
+' Добавление ошибки в историю
+' ===============================================================================
+Private Sub AddToHistory()
+    ' Создаем копию текущей ошибки для истории
+    Dim errorCopy As New Dictionary
+    
+    ' Копируем все поля
+    errorCopy.Add "Number", m_CurrentError.Number
+    errorCopy.Add "Source", m_CurrentError.Source
+    errorCopy.Add "Description", m_CurrentError.Description
+    errorCopy.Add "ErrorType", m_CurrentError.ErrorType
+    errorCopy.Add "Severity", m_CurrentError.Severity
+    errorCopy.Add "ModuleName", m_CurrentError.ModuleName
+    errorCopy.Add "ProcedureName", m_CurrentError.ProcedureName
+    errorCopy.Add "LineNumber", m_CurrentError.LineNumber
+    errorCopy.Add "DateTime", m_CurrentError.DateTime
+    errorCopy.Add "CallStack", m_CurrentError.CallStack
+    errorCopy.Add "VariableState", m_CurrentError.VariableState
+    errorCopy.Add "RecoveryStrategy", m_CurrentError.RecoveryStrategy
+    errorCopy.Add "UserMessage", m_CurrentError.UserMessage
+    errorCopy.Add "TechnicalDetails", m_CurrentError.TechnicalDetails
+    errorCopy.Add "PassportId", m_CurrentError.PassportId
+    
+    ' Добавляем в историю
+    m_ErrorHistory.Add errorCopy
+    
+    ' Проверяем размер истории
+    If m_ErrorHistory.Count > m_MaxHistorySize Then
+        ' Удаляем самую старую запись
+        m_ErrorHistory.RemoveAt 0
+    End If
+End Sub
+
+' ===============================================================================
+' Публикация события об ошибке
+' ===============================================================================
+Private Sub PublishErrorEvent()
+    ' Проверяем наличие EventBus
+    If m_EventBus Is Nothing Then Exit Sub
+    
+    ' Проверяем наличие метода Publish
+    If Not HasMethod(m_EventBus, "Publish") Then Exit Sub
+    
+    ' Создаем данные события
+    Dim eventData As New Dictionary
+    
+    ' Копируем все поля
+    eventData.Add "Number", m_CurrentError.Number
+    eventData.Add "Source", m_CurrentError.Source
+    eventData.Add "Description", m_CurrentError.Description
+    eventData.Add "ErrorType", m_CurrentError.ErrorType
+    eventData.Add "Severity", m_CurrentError.Severity
+    eventData.Add "ModuleName", m_CurrentError.ModuleName
+    eventData.Add "ProcedureName", m_CurrentError.ProcedureName
+    eventData.Add "LineNumber", m_CurrentError.LineNumber
+    eventData.Add "DateTime", m_CurrentError.DateTime
+    eventData.Add "PassportId", m_CurrentError.PassportId
+    
+    ' Публикуем событие
+    m_EventBus.Publish "Error." & m_CurrentError.PassportId, eventData
+    
+    ' Публикуем также общее событие для всех ошибок
+    m_EventBus.Publish "Error", eventData
+End Sub
+
+' ===============================================================================
+' Определение стратегии восстановления
+' ===============================================================================
+Private Sub DetermineRecoveryStrategy()
+    ' Определяем стратегию восстановления на основе типа и серьезности ошибки
+    Select Case m_CurrentError.ErrorType
+        Case etVBA
+            Select Case m_CurrentError.Number
+                Case 1004 ' Ошибка приложения
+                    m_CurrentError.RecoveryStrategy = rsRetry
+                Case 91 ' Object variable or With block variable not set
+                    m_CurrentError.RecoveryStrategy = rsExit
+                Case Else
+                    m_CurrentError.RecoveryStrategy = rsExit
+            End Select
+            
+        Case etApplication
+            Select Case m_CurrentError.Severity
+                Case esCritical
+                    m_CurrentError.RecoveryStrategy = rsExit
+                Case esError
+                    m_CurrentError.RecoveryStrategy = rsAlternative
+                Case esWarning
+                    m_CurrentError.RecoveryStrategy = rsIgnore
+                Case esInfo
+                    m_CurrentError.RecoveryStrategy = rsIgnore
+            End Select
+            
+        Case etDatabase
+            Select Case m_CurrentError.Severity
+                Case esCritical
+                    m_CurrentError.RecoveryStrategy = rsExit
+                Case esError
+                    m_CurrentError.RecoveryStrategy = rsRetry
+                Case esWarning
+                    m_CurrentError.RecoveryStrategy = rsRetry
+                Case esInfo
+                    m_CurrentError.RecoveryStrategy = rsIgnore
+            End Select
+            
+        Case etNetwork
+            m_CurrentError.RecoveryStrategy = rsRetry
+            
+        Case etSecurity
+            m_CurrentError.RecoveryStrategy = rsExit
+            
+        Case etValidation
+            m_CurrentError.RecoveryStrategy = rsAlternative
+            
+        Case etCustom
+            ' Для пользовательских ошибок стратегия должна быть определена явно
+            m_CurrentError.RecoveryStrategy = rsExit
+            
+        Case Else
+            m_CurrentError.RecoveryStrategy = rsExit
+    End Select
+    
+    ' Если включено автовосстановление, проверяем, можно ли использовать выбранную стратегию
+    If m_Registry Is Nothing Then
+        ' По умолчанию автовосстановление включено
+    Else
+        If HasMethod(m_Registry, "GetSetting") Then
+            If Not m_Registry.GetSetting("AutoRecovery", True) Then
+                ' Если автовосстановление отключено, используем только стратегию выхода
+                If m_CurrentError.Severity <= esError Then
+                    m_CurrentError.RecoveryStrategy = rsExit
+                End If
+            End If
+        End If
+    End If
+End Sub
+
+' ===============================================================================
+' Применение стратегии восстановления
+' ===============================================================================
+Private Sub ApplyRecoveryStrategy()
+    ' Применяем стратегию восстановления
+    Select Case m_CurrentError.RecoveryStrategy
+        Case rsNone
+            ' Ничего не делаем
+            
+        Case rsRetry
+            ' Для повторной попытки требуется конкретная реализация
+            ' Это должно быть заменено реальной реализацией
+            ' ...
+            
+        Case rsIgnore
+            ' Просто продолжаем выполнение
+            
+        Case rsRollback
+            ' Для отката изменений требуется конкретная реализация
+            ' Это должно быть заменено реальной реализацией
+            ' ...
+            
+        Case rsAlternative
+            ' Для альтернативного пути требуется конкретная реализация
+            ' Это должно быть заменено реальной реализацией
+            ' ...
+            
+        Case rsExit
+            ' Для этой стратегии могут быть разные реализации
+            ' В данном случае просто выходим из процедуры
+            ' Это должно быть заменено реальной реализацией
+            ' ...
+    End Select
+End Sub
+
+' ===============================================================================
+' Отображение сообщения пользователю
+' ===============================================================================
+Private Sub ShowUserMessage()
+    ' Проверяем, нужно ли отображать сообщение
+    If Len(m_CurrentError.UserMessage) = 0 Then
+        ' Если сообщение не задано, генерируем стандартное
+        Select Case m_CurrentError.Severity
+            Case esCritical
+                m_CurrentError.UserMessage = "Критическая ошибка: " & m_CurrentError.Description & _
+                                             " (ID: " & m_CurrentError.PassportId & ")"
+            Case esError
+                m_CurrentError.UserMessage = "Ошибка: " & m_CurrentError.Description & _
+                                             " (ID: " & m_CurrentError.PassportId & ")"
+            Case esWarning
+                m_CurrentError.UserMessage = "Предупреждение: " & m_CurrentError.Description
+            Case esInfo
+                ' Для информационных сообщений не показываем ничего
+                Exit Sub
+        End Select
+    End If
+    
+    ' Отображаем сообщение в зависимости от серьезности
+    Select Case m_CurrentError.Severity
+        Case esCritical
+            MsgBox m_CurrentError.UserMessage, vbCritical + vbOKOnly, "Критическая ошибка"
+            
+        Case esError
+            MsgBox m_CurrentError.UserMessage, vbExclamation + vbOKOnly, "Ошибка"
+            
+        Case esWarning
+            MsgBox m_CurrentError.UserMessage, vbInformation + vbOKOnly, "Предупреждение"
+            
+        Case esInfo
+            ' Для информационных сообщений можно использовать статусную строку или другой механизм
+            ' Это должно быть заменено реальной реализацией
+            ' ...
+    End Select
+End Sub
+
+' ===============================================================================
+' Получение текста серьезности ошибки
+' ===============================================================================
+Private Function GetSeverityText(ByVal severity As ErrorSeverity) As String
+    Select Case severity
+        Case esCritical
+            GetSeverityText = "CRITICAL"
+        Case esError
+            GetSeverityText = "ERROR"
+        Case esWarning
+            GetSeverityText = "WARNING"
+        Case esInfo
+            GetSeverityText = "INFO"
+        Case Else
+            GetSeverityText = "UNKNOWN"
+    End Select
+End Function
+
+' ===============================================================================
+' Логирование рекурсивной ошибки
+' ===============================================================================
+Private Sub LogRecursiveError(ByVal errNumber As Long, ByVal errSource As String, ByVal errDescription As String)
+    ' Простое логирование в отладочное окно
+    Debug.Print "RECURSIVE ERROR DETECTED: " & errNumber & " - " & errSource & " - " & errDescription
+    
+    ' Можно также логировать в файл, но осторожно, чтобы не вызвать еще одну рекурсию
+    ' ...
+End Sub
+
+' ===============================================================================
+' Логирование внутренней ошибки обработчика
+' ===============================================================================
+Private Sub LogInternalError(ByVal errNumber As Long, ByVal errDescription As String)
+    ' Простое логирование в отладочное окно
+    Debug.Print "INTERNAL ERROR HANDLER ERROR: " & errNumber & " - " & errDescription
+    
+    ' Можно также логировать в файл, но осторожно, чтобы не вызвать еще одну рекурсию
+    ' ...
+End Sub
+
+' ===============================================================================
+' Сброс текущей ошибки
+' ===============================================================================
+Private Sub ResetCurrentError()
+    m_CurrentError.Number = 0
+    m_CurrentError.Source = ""
+    m_CurrentError.Description = ""
+    m_CurrentError.HelpContext = 0
+    m_CurrentError.HelpFile = ""
+    m_CurrentError.ErrorType = etVBA
+    m_CurrentError.Severity = esError
+    m_CurrentError.ModuleName = ""
+    m_CurrentError.ProcedureName = ""
+    m_CurrentError.LineNumber = 0
+    m_CurrentError.DateTime = Now
+    m_CurrentError.CallStack = ""
+    m_CurrentError.VariableState = ""
+    m_CurrentError.RecoveryStrategy = rsNone
+    m_CurrentError.UserMessage = ""
+    m_CurrentError.TechnicalDetails = ""
+    m_CurrentError.IsHandled = False
+    m_CurrentError.PassportId = ""
+End Sub
+
+' ===============================================================================
+' Получение текущей ошибки
+' ===============================================================================
+Public Function GetCurrentError() As Dictionary
+    ' Возвращаем копию текущей ошибки
+    Dim errorCopy As New Dictionary
+    
+    ' Копируем все поля
+    errorCopy.Add "Number", m_CurrentError.Number
+    errorCopy.Add "Source", m_CurrentError.Source
+    errorCopy.Add "Description", m_CurrentError.Description
+    errorCopy.Add "HelpContext", m_CurrentError.HelpContext
+    errorCopy.Add "HelpFile", m_CurrentError.HelpFile
+    errorCopy.Add "ErrorType", m_CurrentError.ErrorType
+    errorCopy.Add "Severity", m_CurrentError.Severity
+    errorCopy.Add "ModuleName", m_CurrentError.ModuleName
+    errorCopy.Add "ProcedureName", m_CurrentError.ProcedureName
+    errorCopy.Add "LineNumber", m_CurrentError.LineNumber
+    errorCopy.Add "DateTime", m_CurrentError.DateTime
+    errorCopy.Add "CallStack", m_CurrentError.CallStack
+    errorCopy.Add "VariableState", m_CurrentError.VariableState
+    errorCopy.Add "RecoveryStrategy", m_CurrentError.RecoveryStrategy
+    errorCopy.Add "UserMessage", m_CurrentError.UserMessage
+    errorCopy.Add "TechnicalDetails", m_CurrentError.TechnicalDetails
+    errorCopy.Add "IsHandled", m_CurrentError.IsHandled
+    errorCopy.Add "PassportId", m_CurrentError.PassportId
+    
+    Set GetCurrentError = errorCopy
+End Function
+
+' ===============================================================================
+' Получение истории ошибок
+' ===============================================================================
+Public Function GetErrorHistory() As Object ' Collection
+    ' Возвращаем копию истории ошибок
+    Dim historyCopy As Object
+    Set historyCopy = CreateObject("System.Collections.ArrayList")
+    
+    Dim i As Long
+    For i = 0 To m_ErrorHistory.Count - 1
+        historyCopy.Add m_ErrorHistory(i)
+    Next i
+    
+    Set GetErrorHistory = historyCopy
+End Function
+
+' ===============================================================================
+' Очистка истории ошибок
+' ===============================================================================
+Public Sub ClearErrorHistory()
+    If Not m_ErrorHistory Is Nothing Then
+        m_ErrorHistory.Clear
+    End If
+End Sub
+
+' ===============================================================================
+' Поиск ошибок в истории
+' ===============================================================================
+Public Function FindErrorsInHistory(Optional ByVal errorType As Variant = Empty, _
+                                   Optional ByVal severity As Variant = Empty, _
+                                   Optional ByVal moduleName As String = "", _
+                                   Optional ByVal procedureName As String = "", _
+                                   Optional ByVal errorNumber As Variant = Empty) As Object ' Collection
+    ' Создаем результирующую коллекцию
+    Dim result As Object
+    Set result = CreateObject("System.Collections.ArrayList")
+    
+    ' Проверяем наличие истории
+    If m_ErrorHistory Is Nothing Or m_ErrorHistory.Count = 0 Then
+        Set FindErrorsInHistory = result
+        Exit Function
+    End If
+    
+    ' Ищем ошибки, соответствующие критериям
+    Dim i As Long
+    For i = 0 To m_ErrorHistory.Count - 1
+        Dim error As Dictionary
+        Set error = m_ErrorHistory(i)
+        
+        ' Проверяем соответствие критериям
+        Dim match As Boolean
+        match = True
+        
+        ' Проверяем тип ошибки
+        If Not IsEmpty(errorType) Then
+            If error("ErrorType") <> errorType Then
+                match = False
+            End If
+        End If
+        
+        ' Проверяем серьезность
+        If Not IsEmpty(severity) Then
+            If error("Severity") <> severity Then
+                match = False
+            End If
+        End If
+        
+        ' Проверяем имя модуля
+        If Len(moduleName) > 0 Then
+            If error("ModuleName") <> moduleName Then
+                match = False
+            End If
+        End If
+        
+        ' Проверяем имя процедуры
+        If Len(procedureName) > 0 Then
+            If error("ProcedureName") <> procedureName Then
+                match = False
+            End If
+        End If
+        
+        ' Проверяем номер ошибки
+        If Not IsEmpty(errorNumber) Then
+            If error("Number") <> errorNumber Then
+                match = False
+            End If
+        End If
+        
+        ' Если ошибка соответствует всем критериям, добавляем в результат
+        If match Then
+            result.Add error
+        End If
+    Next i
+    
+    Set FindErrorsInHistory = result
+End Function
+
+' ===============================================================================
+' Обработка изменения режима работы
+' ===============================================================================
+Public Sub OnModeChange(ByVal oldMode As Long, ByVal newMode As Long)
+    ' Этот метод вызывается Registry при изменении режима работы
+    ' Реализуем при необходимости
+End Sub
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся получить тип объекта
+    Dim typeName As String
+    typeName = TypeName(obj)
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    If Not m_Initialized Then Exit Sub
+    
+    ' Очищаем историю ошибок
+    If Not m_ErrorHistory Is Nothing Then
+        m_ErrorHistory.Clear
+        Set m_ErrorHistory = Nothing
+    End If
+    
+    ' Очищаем ссылки на зависимости
+    Set m_Registry = Nothing
+    Set m_EventBus = Nothing
+    Set m_PassportSystem = Nothing
+    
+    ' Сбрасываем текущую ошибку
+    ResetCurrentError
+    
+    m_Initialized = False
+    m_Active = False
+End Sub

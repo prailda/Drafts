@@ -1,0 +1,883 @@
+' ===============================================================================
+' Примеры конкретных реализаций команд для различных задач системы
+' ===============================================================================
+
+' ===== ДИАГНОСТИЧЕСКИЕ КОМАНДЫ =====
+
+' ===============================================================================
+' FlagCommand - Команда для установки/снятия флага
+' ===============================================================================
+' Класс FlagCommand (создать в отдельном модуле класса)
+Option Explicit
+
+' Наследуем от BaseCommand
+Private m_flagName As String        ' Имя флага
+Private m_flagValue As Variant      ' Значение флага
+Private m_moduleName As String      ' Имя модуля
+Private m_procedureName As String   ' Имя процедуры
+Private m_oldValue As Variant       ' Предыдущее значение флага
+Private m_flagManager As Object     ' Ссылка на FlagManager
+
+' Инициализация от базового класса
+' (из BaseCommand)
+Private m_name As String
+Private m_description As String
+Private m_result As Object
+Private m_errorCode As Long
+Private m_errorMessage As String
+Private m_registry As Object
+Private m_eventBus As Object
+Private m_initialized As Boolean
+
+' ===============================================================================
+' Инициализация команды
+' ===============================================================================
+Public Sub Initialize(ByVal name As String, _
+                      ByVal description As String, _
+                      Optional ByVal registry As Object = Nothing, _
+                      Optional ByVal eventBus As Object = Nothing)
+    
+    ' Устанавливаем базовые свойства
+    m_name = name
+    m_description = description
+    
+    ' Сохраняем ссылки на сервисы
+    Set m_registry = registry
+    Set m_eventBus = eventBus
+    
+    ' Создаем объект для результатов
+    Set m_result = CreateObject("Scripting.Dictionary")
+    
+    ' Сбрасываем информацию об ошибках
+    ResetError
+    
+    m_initialized = True
+End Sub
+
+' ===============================================================================
+' Дополнительная инициализация специфичных параметров
+' ===============================================================================
+Public Sub SetFlagParameters(ByVal flagName As String, _
+                           ByVal flagValue As Variant, _
+                           Optional ByVal moduleName As String = "", _
+                           Optional ByVal procedureName As String = "")
+    
+    m_flagName = flagName
+    m_flagValue = flagValue
+    m_moduleName = moduleName
+    m_procedureName = procedureName
+    
+    ' Если есть Registry, получаем FlagManager
+    If Not m_registry Is Nothing Then
+        If HasMethod(m_registry, "GetComponent") Then
+            Set m_flagManager = m_registry.GetComponent("FlagManager")
+        End If
+    End If
+End Sub
+
+' ===============================================================================
+' Метод выполнения команды
+' ===============================================================================
+Public Function Execute() As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then
+        SetError 1, "Command not initialized"
+        Execute = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие FlagManager
+    If m_flagManager Is Nothing Then
+        SetError 2, "FlagManager not available"
+        Execute = False
+        Exit Function
+    End If
+    
+    ' Публикуем событие начала выполнения
+    PublishEvent "Command.Executing", Me
+    
+    ' Сохраняем старое значение флага, если есть
+    If HasMethod(m_flagManager, "GetFlag") Then
+        m_oldValue = m_flagManager.GetFlag(m_flagName)
+    End If
+    
+    ' Устанавливаем флаг
+    On Error Resume Next
+    
+    Dim success As Boolean
+    
+    If Len(m_moduleName) > 0 And Len(m_procedureName) > 0 Then
+        ' Используем полную версию с указанием модуля и процедуры
+        If HasMethod(m_flagManager, "SetFlagWithContext") Then
+            success = m_flagManager.SetFlagWithContext(m_flagName, m_flagValue, m_moduleName, m_procedureName)
+        Else
+            ' Если нет специального метода, используем обычный
+            success = m_flagManager.SetFlag(m_flagName, m_flagValue)
+        End If
+    Else
+        ' Используем простую версию
+        success = m_flagManager.SetFlag(m_flagName, m_flagValue)
+    End If
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        SetError 3, "Error setting flag: " & Err.Description
+        success = False
+    End If
+    
+    On Error GoTo 0
+    
+    ' Добавляем результат
+    AddResult "FlagName", m_flagName
+    AddResult "FlagValue", m_flagValue
+    AddResult "Success", success
+    
+    ' Публикуем событие о результате
+    If success Then
+        PublishEvent "Command.Executed", Me
+    Else
+        PublishEvent "Command.Failed", Me
+    End If
+    
+    Execute = success
+End Function
+
+' ===============================================================================
+' Метод отмены выполнения команды
+' ===============================================================================
+Public Function Undo() As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then
+        SetError 1, "Command not initialized"
+        Undo = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие FlagManager
+    If m_flagManager Is Nothing Then
+        SetError 2, "FlagManager not available"
+        Undo = False
+        Exit Function
+    End If
+    
+    ' Публикуем событие начала отмены
+    PublishEvent "Command.Undoing", Me
+    
+    ' Восстанавливаем старое значение флага
+    On Error Resume Next
+    
+    Dim success As Boolean
+    success = m_flagManager.SetFlag(m_flagName, m_oldValue)
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        SetError 4, "Error restoring flag: " & Err.Description
+        success = False
+    End If
+    
+    On Error GoTo 0
+    
+    ' Добавляем результат
+    AddResult "FlagName", m_flagName
+    AddResult "RestoredValue", m_oldValue
+    AddResult "Success", success
+    
+    ' Публикуем событие о результате
+    If success Then
+        PublishEvent "Command.Undone", Me
+    Else
+        PublishEvent "Command.UndoFailed", Me
+    End If
+    
+    Undo = success
+End Function
+
+' ===============================================================================
+' Проверка возможности выполнения команды
+' ===============================================================================
+Public Function CanExecute() As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then
+        CanExecute = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие FlagManager
+    If m_flagManager Is Nothing Then
+        CanExecute = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие необходимых методов
+    CanExecute = HasMethod(m_flagManager, "SetFlag")
+End Function
+
+' ===============================================================================
+' Получение имени команды
+' ===============================================================================
+Public Property Get Name() As String
+    Name = m_name
+End Property
+
+' ===============================================================================
+' Получение описания команды
+' ===============================================================================
+Public Property Get Description() As String
+    Description = m_description
+End Property
+
+' ===============================================================================
+' Получение результата выполнения
+' ===============================================================================
+Public Property Get Result() As Object ' Dictionary
+    Set Result = m_result
+End Property
+
+' ===============================================================================
+' Получение кода ошибки
+' ===============================================================================
+Public Property Get ErrorCode() As Long
+    ErrorCode = m_errorCode
+End Property
+
+' ===============================================================================
+' Получение сообщения об ошибке
+' ===============================================================================
+Public Property Get ErrorMessage() As String
+    ErrorMessage = m_errorMessage
+End Property
+
+' ===============================================================================
+' Установка информации об ошибке
+' ===============================================================================
+Private Sub SetError(ByVal errorCode As Long, ByVal errorMessage As String)
+    m_errorCode = errorCode
+    m_errorMessage = errorMessage
+    
+    ' Добавляем информацию об ошибке в результат
+    If Not m_result Is Nothing Then
+        m_result("ErrorCode") = errorCode
+        m_result("ErrorMessage") = errorMessage
+    End If
+    
+    ' Публикуем событие об ошибке
+    If errorCode <> 0 Then
+        PublishEvent "Command.Error", Me
+    End If
+End Sub
+
+' ===============================================================================
+' Сброс информации об ошибке
+' ===============================================================================
+Private Sub ResetError()
+    m_errorCode = 0
+    m_errorMessage = ""
+    
+    ' Удаляем информацию об ошибке из результата
+    If Not m_result Is Nothing Then
+        If m_result.Exists("ErrorCode") Then m_result.Remove "ErrorCode"
+        If m_result.Exists("ErrorMessage") Then m_result.Remove "ErrorMessage"
+    End If
+End Sub
+
+' ===============================================================================
+' Добавление данных в результат
+' ===============================================================================
+Private Sub AddResult(ByVal key As String, ByVal value As Variant)
+    If m_result Is Nothing Then Exit Sub
+    
+    ' Если ключ уже существует, обновляем значение
+    If m_result.Exists(key) Then
+        m_result(key) = value
+    Else
+        ' Иначе добавляем новый ключ-значение
+        m_result.Add key, value
+    End If
+End Sub
+
+' ===============================================================================
+' Публикация события через EventBus
+' ===============================================================================
+Private Sub PublishEvent(ByVal topic As String, ByVal command As Object)
+    ' Проверяем наличие EventBus
+    If m_eventBus Is Nothing Then Exit Sub
+    
+    ' Проверяем, что EventBus имеет метод Publish
+    If Not HasMethod(m_eventBus, "Publish") Then Exit Sub
+    
+    ' Публикуем событие
+    m_eventBus.Publish topic, command
+End Sub
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    ' Освобождаем ссылки
+    Set m_result = Nothing
+    Set m_registry = Nothing
+    Set m_eventBus = Nothing
+    Set m_flagManager = Nothing
+    
+    m_initialized = False
+End Sub
+
+' ===== КОМАНДЫ ИНСТРУМЕНТИРОВАНИЯ =====
+
+' ===============================================================================
+' InstrumentCodeCommand - Команда для инструментирования кода
+' ===============================================================================
+' Класс InstrumentCodeCommand (создать в отдельном модуле класса)
+Option Explicit
+
+' Наследуем от BaseCommand
+Private m_moduleName As String      ' Имя модуля для инструментирования
+Private m_procName As String        ' Имя процедуры для инструментирования (опционально)
+Private m_instrumentType As String  ' Тип инструментирования (Entry, Exit, Both)
+Private m_codeAccessor As Object    ' Ссылка на CodeAccessor
+Private m_originalCode As String    ' Исходный код для отмены
+
+' Инициализация от базового класса
+' (из BaseCommand)
+Private m_name As String
+Private m_description As String
+Private m_result As Object
+Private m_errorCode As Long
+Private m_errorMessage As String
+Private m_registry As Object
+Private m_eventBus As Object
+Private m_initialized As Boolean
+
+' ===============================================================================
+' Инициализация команды
+' ===============================================================================
+Public Sub Initialize(ByVal name As String, _
+                      ByVal description As String, _
+                      Optional ByVal registry As Object = Nothing, _
+                      Optional ByVal eventBus As Object = Nothing)
+    
+    ' Устанавливаем базовые свойства
+    m_name = name
+    m_description = description
+    
+    ' Сохраняем ссылки на сервисы
+    Set m_registry = registry
+    Set m_eventBus = eventBus
+    
+    ' Создаем объект для результатов
+    Set m_result = CreateObject("Scripting.Dictionary")
+    
+    ' Сбрасываем информацию об ошибках
+    ResetError
+    
+    m_initialized = True
+    
+    ' Если есть Registry, получаем CodeAccessor
+    If Not m_registry Is Nothing Then
+        If HasMethod(m_registry, "GetComponent") Then
+            Set m_codeAccessor = m_registry.GetComponent("CodeAccessor")
+        End If
+    End If
+End Sub
+
+' ===============================================================================
+' Дополнительная инициализация специфичных параметров
+' ===============================================================================
+Public Sub SetInstrumentParameters(ByVal moduleName As String, _
+                                  Optional ByVal procName As String = "", _
+                                  Optional ByVal instrumentType As String = "Both")
+    
+    m_moduleName = moduleName
+    m_procName = procName
+    m_instrumentType = instrumentType
+End Sub
+
+' ===============================================================================
+' Метод выполнения команды
+' ===============================================================================
+Public Function Execute() As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then
+        SetError 1, "Command not initialized"
+        Execute = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие CodeAccessor
+    If m_codeAccessor Is Nothing Then
+        SetError 2, "CodeAccessor not available"
+        Execute = False
+        Exit Function
+    End If
+    
+    ' Публикуем событие начала выполнения
+    PublishEvent "Command.Executing", Me
+    
+    ' Сохраняем оригинальный код для возможности отмены
+    On Error Resume Next
+    
+    ' Если задано имя процедуры, то сохраняем только код процедуры
+    If Len(m_procName) > 0 Then
+        m_originalCode = m_codeAccessor.GetProcedureCode(m_moduleName, m_procName)
+    Else
+        ' Иначе сохраняем весь модуль
+        m_originalCode = m_codeAccessor.GetModuleCode(m_moduleName)
+    End If
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        SetError 3, "Error getting original code: " & Err.Description
+        Execute = False
+        Exit Function
+    End If
+    
+    ' Выполняем инструментирование
+    Dim success As Boolean
+    
+    If Len(m_procName) > 0 Then
+        ' Инструментируем конкретную процедуру
+        Select Case m_instrumentType
+            Case "Entry"
+                success = InstrumentProcedureEntry(m_moduleName, m_procName)
+            Case "Exit"
+                success = InstrumentProcedureExit(m_moduleName, m_procName)
+            Case "Both"
+                success = InstrumentProcedureBoth(m_moduleName, m_procName)
+            Case Else
+                SetError 4, "Unknown instrumentation type: " & m_instrumentType
+                success = False
+        End Select
+    Else
+        ' Инструментируем весь модуль
+        If HasMethod(m_codeAccessor, "InstrumentModuleCode") Then
+            success = m_codeAccessor.InstrumentModuleCode(m_moduleName)
+        Else
+            SetError 5, "Module instrumentation not supported"
+            success = False
+        End If
+    End If
+    
+    On Error GoTo 0
+    
+    ' Добавляем результат
+    AddResult "ModuleName", m_moduleName
+    If Len(m_procName) > 0 Then AddResult "ProcedureName", m_procName
+    AddResult "InstrumentationType", m_instrumentType
+    AddResult "Success", success
+    
+    ' Публикуем событие о результате
+    If success Then
+        PublishEvent "Command.Executed", Me
+    Else
+        PublishEvent "Command.Failed", Me
+    End If
+    
+    Execute = success
+End Function
+
+' ===============================================================================
+' Инструментирование начала процедуры
+' ===============================================================================
+Private Function InstrumentProcedureEntry(ByVal moduleName As String, ByVal procName As String) As Boolean
+    ' Здесь должна быть реализация инструментирования начала процедуры
+    ' Используем CodeAccessor для анализа и модификации кода
+    
+    ' Упрощенный пример (в реальном коде нужно использовать более сложную логику)
+    On Error Resume Next
+    
+    ' Получаем код процедуры
+    Dim procCode As String
+    procCode = m_codeAccessor.GetProcedureCode(moduleName, procName)
+    
+    ' Находим первую выполняемую строку после заголовка процедуры
+    Dim lines() As String
+    lines = Split(procCode, vbNewLine)
+    
+    Dim i As Long
+    Dim firstCodeLine As Long
+    firstCodeLine = -1
+    
+    For i = 0 To UBound(lines)
+        Dim line As String
+        line = Trim(lines(i))
+        
+        ' Пропускаем пустые строки, комментарии и заголовок процедуры
+        If Len(line) > 0 And Left(line, 1) <> "'" And _
+           Not (Left(line, 3) = "Sub" Or Left(line, 8) = "Function" Or Left(line, 8) = "Property") Then
+            ' Нашли первую выполняемую строку
+            firstCodeLine = i
+            Exit For
+        End If
+    Next i
+    
+    ' Если нашли первую выполняемую строку, вставляем код инструментирования
+    If firstCodeLine >= 0 Then
+        ' Определяем номер строки в модуле
+        Dim procStartLine As Long
+        Dim firstCodeLineInModule As Long
+        
+        ' Получаем начальную строку процедуры в модуле
+        procStartLine = m_codeAccessor.GetProcedureStartLine(moduleName, procName)
+        
+        ' Вычисляем номер строки в модуле
+        firstCodeLineInModule = procStartLine + firstCodeLine
+        
+        ' Генерируем код инструментирования
+        Dim instrumentationCode As String
+        instrumentationCode = "    ' ### DEBUG_START ###" & vbNewLine & _
+                              "    On Error Resume Next" & vbNewLine & _
+                              "    FlagManager.SetFlag ""ENTRY_" & procName & "_" & Format(Now, "yyyymmddhhnnss") & """, """ & _
+                              moduleName & "." & procName & ".Entry""" & vbNewLine & _
+                              "    On Error GoTo 0" & vbNewLine & _
+                              "    ' ### DEBUG_END ###"
+        
+        ' Вставляем код
+        If HasMethod(m_codeAccessor, "InsertCode") Then
+            m_codeAccessor.InsertCode moduleName, firstCodeLineInModule, instrumentationCode
+        Else
+            Err.Raise 5, "InstrumentCodeCommand", "InsertCode method not available"
+        End If
+    Else
+        Err.Raise 5, "InstrumentCodeCommand", "Could not find first executable line"
+    End If
+    
+    ' Проверяем наличие ошибки
+    InstrumentProcedureEntry = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Инструментирование конца процедуры
+' ===============================================================================
+Private Function InstrumentProcedureExit(ByVal moduleName As String, ByVal procName As String) As Boolean
+    ' Здесь должна быть реализация инструментирования конца процедуры
+    ' Упрощенный пример (в реальном коде нужно использовать более сложную логику)
+    
+    On Error Resume Next
+    
+    ' Получаем код процедуры
+    Dim procCode As String
+    procCode = m_codeAccessor.GetProcedureCode(moduleName, procName)
+    
+    ' Находим строки End Sub, End Function, Exit Sub, Exit Function и т.д.
+    Dim lines() As String
+    lines = Split(procCode, vbNewLine)
+    
+    Dim procStartLine As Long
+    procStartLine = m_codeAccessor.GetProcedureStartLine(moduleName, procName)
+    
+    ' Перебираем строки и инструментируем точки выхода
+    Dim i As Long
+    Dim success As Boolean
+    success = True
+    
+    For i = 0 To UBound(lines)
+        Dim line As String
+        line = Trim(lines(i))
+        
+        ' Ищем строки выхода
+        If line = "End Sub" Or line = "End Function" Or line = "End Property" Or _
+           line = "Exit Sub" Or line = "Exit Function" Or line = "Exit Property" Then
+            
+            ' Определяем номер строки в модуле
+            Dim lineInModule As Long
+            lineInModule = procStartLine + i
+            
+            ' Генерируем код инструментирования
+            Dim instrumentationCode As String
+            instrumentationCode = "    ' ### DEBUG_START ###" & vbNewLine & _
+                                  "    On Error Resume Next" & vbNewLine & _
+                                  "    FlagManager.SetFlag ""EXIT_" & procName & "_" & Format(Now, "yyyymmddhhnnss") & """, """ & _
+                                  moduleName & "." & procName & ".Exit""" & vbNewLine & _
+                                  "    On Error GoTo 0" & vbNewLine & _
+                                  "    ' ### DEBUG_END ###"
+            
+            ' Вставляем код перед строкой выхода
+            If HasMethod(m_codeAccessor, "InsertCode") Then
+                m_codeAccessor.InsertCode moduleName, lineInModule, instrumentationCode
+                
+                ' Корректируем индекс, так как добавили новые строки
+                i = i + 5
+            Else
+                Err.Raise 5, "InstrumentCodeCommand", "InsertCode method not available"
+                success = False
+                Exit For
+            End If
+        End If
+    Next i
+    
+    ' Проверяем наличие ошибки
+    InstrumentProcedureExit = success And (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Инструментирование начала и конца процедуры
+' ===============================================================================
+Private Function InstrumentProcedureBoth(ByVal moduleName As String, ByVal procName As String) As Boolean
+    ' Инструментируем начало и конец
+    Dim entrySuccess As Boolean
+    Dim exitSuccess As Boolean
+    
+    entrySuccess = InstrumentProcedureEntry(moduleName, procName)
+    exitSuccess = InstrumentProcedureExit(moduleName, procName)
+    
+    InstrumentProcedureBoth = entrySuccess And exitSuccess
+End Function
+
+' ===============================================================================
+' Метод отмены выполнения команды
+' ===============================================================================
+Public Function Undo() As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then
+        SetError 1, "Command not initialized"
+        Undo = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие CodeAccessor
+    If m_codeAccessor Is Nothing Then
+        SetError 2, "CodeAccessor not available"
+        Undo = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие оригинального кода
+    If Len(m_originalCode) = 0 Then
+        SetError 6, "No original code available for undo"
+        Undo = False
+        Exit Function
+    End If
+    
+    ' Публикуем событие начала отмены
+    PublishEvent "Command.Undoing", Me
+    
+    ' Восстанавливаем оригинальный код
+    On Error Resume Next
+    
+    Dim success As Boolean
+    
+    If Len(m_procName) > 0 Then
+        ' Восстанавливаем код процедуры
+        ' Это упрощенный пример - в реальном коде нужно учитывать строки в модуле
+        ' Смотрим на методы CodeAccessor для правильного подхода
+        If HasMethod(m_codeAccessor, "SetProcedureCode") Then
+            success = m_codeAccessor.SetProcedureCode(m_moduleName, m_procName, m_originalCode)
+        Else
+            ' Альтернативный подход - использовать CleanupInstrumentation
+            If HasMethod(m_codeAccessor, "CleanupInstrumentation") Then
+                success = m_codeAccessor.CleanupInstrumentation(m_moduleName)
+            Else
+                SetError 7, "No method available for code restoration"
+                success = False
+            End If
+        End If
+    Else
+        ' Восстанавливаем весь модуль
+        If HasMethod(m_codeAccessor, "SetModuleCode") Then
+            success = m_codeAccessor.SetModuleCode(m_moduleName, m_originalCode)
+        Else
+            ' Альтернативный подход - использовать CleanupInstrumentation
+            If HasMethod(m_codeAccessor, "CleanupInstrumentation") Then
+                success = m_codeAccessor.CleanupInstrumentation(m_moduleName)
+            Else
+                SetError 7, "No method available for code restoration"
+                success = False
+            End If
+        End If
+    End If
+    
+    ' Проверяем наличие ошибки
+    If Err.Number <> 0 Then
+        SetError 8, "Error restoring code: " & Err.Description
+        success = False
+    End If
+    
+    On Error GoTo 0
+    
+    ' Добавляем результат
+    AddResult "ModuleName", m_moduleName
+    If Len(m_procName) > 0 Then AddResult "ProcedureName", m_procName
+    AddResult "Success", success
+    
+    ' Публикуем событие о результате
+    If success Then
+        PublishEvent "Command.Undone", Me
+    Else
+        PublishEvent "Command.UndoFailed", Me
+    End If
+    
+    Undo = success
+End Function
+
+' ===============================================================================
+' Проверка возможности выполнения команды
+' ===============================================================================
+Public Function CanExecute() As Boolean
+    ' Проверяем инициализацию
+    If Not m_initialized Then
+        CanExecute = False
+        Exit Function
+    End If
+    
+    ' Проверяем наличие CodeAccessor
+    If m_codeAccessor Is Nothing Then
+        CanExecute = False
+        Exit Function
+    End If
+    
+    ' Проверяем доступность VBIDE API
+    If HasMethod(m_codeAccessor, "IsVBIDEAvailable") Then
+        CanExecute = m_codeAccessor.IsVBIDEAvailable()
+    Else
+        ' Если метода нет, проверяем косвенно - может ли CodeAccessor получить код модуля
+        On Error Resume Next
+        Dim code As String
+        code = m_codeAccessor.GetModuleCode(m_moduleName)
+        CanExecute = (Err.Number = 0 And Len(code) > 0)
+        On Error GoTo 0
+    End If
+End Function
+
+' ===============================================================================
+' Получение имени команды
+' ===============================================================================
+Public Property Get Name() As String
+    Name = m_name
+End Property
+
+' ===============================================================================
+' Получение описания команды
+' ===============================================================================
+Public Property Get Description() As String
+    Description = m_description
+End Property
+
+' ===============================================================================
+' Получение результата выполнения
+' ===============================================================================
+Public Property Get Result() As Object ' Dictionary
+    Set Result = m_result
+End Property
+
+' ===============================================================================
+' Получение кода ошибки
+' ===============================================================================
+Public Property Get ErrorCode() As Long
+    ErrorCode = m_errorCode
+End Property
+
+' ===============================================================================
+' Получение сообщения об ошибке
+' ===============================================================================
+Public Property Get ErrorMessage() As String
+    ErrorMessage = m_errorMessage
+End Property
+
+' ===============================================================================
+' Установка информации об ошибке
+' ===============================================================================
+Private Sub SetError(ByVal errorCode As Long, ByVal errorMessage As String)
+    m_errorCode = errorCode
+    m_errorMessage = errorMessage
+    
+    ' Добавляем информацию об ошибке в результат
+    If Not m_result Is Nothing Then
+        m_result("ErrorCode") = errorCode
+        m_result("ErrorMessage") = errorMessage
+    End If
+    
+    ' Публикуем событие об ошибке
+    If errorCode <> 0 Then
+        PublishEvent "Command.Error", Me
+    End If
+End Sub
+
+' ===============================================================================
+' Сброс информации об ошибке
+' ===============================================================================
+Private Sub ResetError()
+    m_errorCode = 0
+    m_errorMessage = ""
+    
+    ' Удаляем информацию об ошибке из результата
+    If Not m_result Is Nothing Then
+        If m_result.Exists("ErrorCode") Then m_result.Remove "ErrorCode"
+        If m_result.Exists("ErrorMessage") Then m_result.Remove "ErrorMessage"
+    End If
+End Sub
+
+' ===============================================================================
+' Добавление данных в результат
+' ===============================================================================
+Private Sub AddResult(ByVal key As String, ByVal value As Variant)
+    If m_result Is Nothing Then Exit Sub
+    
+    ' Если ключ уже существует, обновляем значение
+    If m_result.Exists(key) Then
+        m_result(key) = value
+    Else
+        ' Иначе добавляем новый ключ-значение
+        m_result.Add key, value
+    End If
+End Sub
+
+' ===============================================================================
+' Публикация события через EventBus
+' ===============================================================================
+Private Sub PublishEvent(ByVal topic As String, ByVal command As Object)
+    ' Проверяем наличие EventBus
+    If m_eventBus Is Nothing Then Exit Sub
+    
+    ' Проверяем, что EventBus имеет метод Publish
+    If Not HasMethod(m_eventBus, "Publish") Then Exit Sub
+    
+    ' Публикуем событие
+    m_eventBus.Publish topic, command
+End Sub
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    ' Освобождаем ссылки
+    Set m_result = Nothing
+    Set m_registry = Nothing
+    Set m_eventBus = Nothing
+    Set m_codeAccessor = Nothing
+    
+    m_initialized = False
+End Sub

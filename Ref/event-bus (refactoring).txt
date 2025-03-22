@@ -1,0 +1,471 @@
+' ===============================================================================
+' EventBus - система публикации-подписки для общения между компонентами
+' -------------------------------------------------------------------------------
+' Модуль реализует механизм событийно-ориентированной коммуникации между 
+' компонентами системы, обеспечивая слабое связывание и гибкость архитектуры.
+' ===============================================================================
+Option Explicit
+
+' Уровни приоритета для событий
+Public Enum EventPriority
+    epCritical = 0   ' Критический приоритет (обрабатывается немедленно)
+    epHigh = 1       ' Высокий приоритет
+    epNormal = 2     ' Обычный приоритет
+    epLow = 3        ' Низкий приоритет
+    epBackground = 4 ' Фоновый приоритет (обрабатывается при простое)
+End Enum
+
+' Структура для хранения информации о подписчике
+Private Type Subscriber
+    Component As Object       ' Объект-подписчик
+    CallbackMethod As String  ' Метод объекта для вызова
+    Filter As String          ' Фильтр событий (пустой = все события)
+    Priority As EventPriority ' Приоритет обработки событий
+End Type
+
+' Словарь для хранения подписчиков по темам
+Private m_Subscribers As Object ' Dictionary(тема => Collection(Subscriber))
+
+' Очередь событий для асинхронной обработки
+Private m_EventQueue As Object ' Collection
+
+' Флаг активности асинхронной обработки
+Private m_IsProcessingQueue As Boolean
+
+' Флаг инициализации
+Private m_Initialized As Boolean
+
+' Счетчик рекурсии для предотвращения циклических зависимостей
+Private m_RecursionCount As Long
+
+' Максимальная глубина рекурсии
+Private Const MAX_RECURSION As Long = 10
+
+' Ссылка на Registry
+Private m_Registry As Object
+
+' ===============================================================================
+' Инициализация шины событий
+' ===============================================================================
+Public Sub Initialize(Optional ByVal registry As Object = Nothing)
+    If m_Initialized Then Exit Sub
+    
+    ' Инициализируем словарь подписчиков
+    Set m_Subscribers = CreateObject("Scripting.Dictionary")
+    
+    ' Инициализируем очередь событий
+    Set m_EventQueue = CreateObject("System.Collections.ArrayList")
+    
+    ' Сохраняем ссылку на Registry
+    If Not registry Is Nothing Then
+        Set m_Registry = registry
+    End If
+    
+    m_RecursionCount = 0
+    m_IsProcessingQueue = False
+    m_Initialized = True
+End Sub
+
+' ===============================================================================
+' Подписка на события определенной темы
+' ===============================================================================
+Public Function Subscribe(ByVal component As Object, _
+                         ByVal topic As String, _
+                         ByVal callbackMethod As String, _
+                         Optional ByVal filter As String = "", _
+                         Optional ByVal priority As EventPriority = epNormal) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверяем инициализацию
+    If Not m_Initialized Then Initialize
+    
+    ' Проверяем, что тема не пустая
+    If Len(Trim(topic)) = 0 Then
+        Subscribe = False
+        Exit Function
+    End If
+    
+    ' Проверяем, что передан компонент
+    If component Is Nothing Then
+        Subscribe = False
+        Exit Function
+    End If
+    
+    ' Проверяем, что метод существует
+    If Not HasMethod(component, callbackMethod) Then
+        Subscribe = False
+        Exit Function
+    End If
+    
+    ' Создаем информацию о подписчике
+    Dim sub_info As Subscriber
+    sub_info.Component = component
+    sub_info.CallbackMethod = callbackMethod
+    sub_info.Filter = filter
+    sub_info.Priority = priority
+    
+    ' Проверяем, есть ли уже подписчики на эту тему
+    If Not m_Subscribers.Exists(topic) Then
+        ' Создаем новую коллекцию для этой темы
+        Dim subs As New Collection
+        m_Subscribers.Add topic, subs
+    End If
+    
+    ' Добавляем подписчика
+    Dim subInfo As New Dictionary
+    subInfo.Add "component", component
+    subInfo.Add "method", callbackMethod
+    subInfo.Add "filter", filter
+    subInfo.Add "priority", priority
+    
+    m_Subscribers(topic).Add subInfo
+    
+    Subscribe = True
+    Exit Function
+    
+ErrorHandler:
+    Subscribe = False
+End Function
+
+' ===============================================================================
+' Отмена подписки на события определенной темы
+' ===============================================================================
+Public Function Unsubscribe(ByVal component As Object, _
+                           ByVal topic As String, _
+                           Optional ByVal callbackMethod As String = "") As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверяем инициализацию
+    If Not m_Initialized Then
+        Unsubscribe = False
+        Exit Function
+    End If
+    
+    ' Проверяем, есть ли подписчики на эту тему
+    If Not m_Subscribers.Exists(topic) Then
+        Unsubscribe = False
+        Exit Function
+    End If
+    
+    ' Получаем коллекцию подписчиков
+    Dim subs As Collection
+    Set subs = m_Subscribers(topic)
+    
+    ' Перебираем подписчиков в обратном порядке для безопасного удаления
+    Dim i As Long
+    For i = subs.Count To 1 Step -1
+        Dim subInfo As Dictionary
+        Set subInfo = subs(i)
+        
+        ' Проверяем совпадение компонента и метода
+        If subInfo("component") Is component Then
+            If Len(callbackMethod) = 0 Or subInfo("method") = callbackMethod Then
+                ' Удаляем подписчика
+                subs.Remove i
+            End If
+        End If
+    Next i
+    
+    ' Если подписчиков не осталось, удаляем тему
+    If subs.Count = 0 Then
+        m_Subscribers.Remove topic
+    End If
+    
+    Unsubscribe = True
+    Exit Function
+    
+ErrorHandler:
+    Unsubscribe = False
+End Function
+
+' ===============================================================================
+' Публикация события определенной темы
+' ===============================================================================
+Public Function Publish(ByVal topic As String, _
+                       Optional ByVal eventData As Variant = Empty, _
+                       Optional ByVal isAsync As Boolean = False) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверяем инициализацию
+    If Not m_Initialized Then Initialize
+    
+    ' Проверяем глубину рекурсии
+    If m_RecursionCount > MAX_RECURSION Then
+        ' Слишком глубокая рекурсия, вероятно циклическая зависимость
+        LogRecursionError topic
+        Publish = False
+        Exit Function
+    End If
+    
+    ' Если запрошена асинхронная обработка, добавляем в очередь
+    If isAsync Then
+        AddToQueue topic, eventData
+        ' Запускаем обработку очереди, если она не запущена
+        If Not m_IsProcessingQueue Then
+            Application.OnTime Now, "ProcessEventQueue"
+        End If
+        Publish = True
+        Exit Function
+    End If
+    
+    ' Проверяем, есть ли подписчики на эту тему
+    If Not m_Subscribers.Exists(topic) Then
+        Publish = True ' Нет подписчиков - успешное завершение
+        Exit Function
+    End If
+    
+    ' Увеличиваем счетчик рекурсии
+    m_RecursionCount = m_RecursionCount + 1
+    
+    ' Получаем коллекцию подписчиков и сортируем по приоритету
+    Dim subscribersByPriority As Object
+    Set subscribersByPriority = CreateObject("Scripting.Dictionary")
+    
+    Dim i As Long
+    For i = 0 To 4 ' По количеству возможных приоритетов
+        subscribersByPriority.Add i, CreateObject("System.Collections.ArrayList")
+    Next i
+    
+    ' Распределяем подписчиков по приоритетам
+    Dim subInfo As Dictionary
+    For Each subInfo In m_Subscribers(topic)
+        Dim priority As EventPriority
+        priority = subInfo("priority")
+        subscribersByPriority(priority).Add subInfo
+    Next subInfo
+    
+    ' Обрабатываем подписчиков в порядке приоритета
+    For i = 0 To 4
+        Dim prioritySubscribers As Object
+        Set prioritySubscribers = subscribersByPriority(i)
+        
+        Dim j As Long
+        For j = 0 To prioritySubscribers.Count - 1
+            Set subInfo = prioritySubscribers(j)
+            
+            ' Проверяем фильтр
+            Dim filter As String
+            filter = subInfo("filter")
+            
+            If Len(filter) = 0 Or InStr(CStr(topic), filter) > 0 Then
+                ' Вызываем метод обратного вызова
+                Dim component As Object
+                Set component = subInfo("component")
+                Dim method As String
+                method = subInfo("method")
+                
+                On Error Resume Next
+                CallByName component, method, VbMethod, topic, eventData
+                
+                If Err.Number <> 0 Then
+                    ' Логируем ошибку
+                    LogCallbackError topic, component, method, Err.Number, Err.Description
+                End If
+                On Error GoTo ErrorHandler
+            End If
+        Next j
+    Next i
+    
+    ' Уменьшаем счетчик рекурсии
+    m_RecursionCount = m_RecursionCount - 1
+    
+    Publish = True
+    Exit Function
+    
+ErrorHandler:
+    ' Уменьшаем счетчик рекурсии
+    m_RecursionCount = m_RecursionCount - 1
+    
+    ' Логируем ошибку
+    LogPublishError topic, Err.Number, Err.Description
+    
+    Publish = False
+End Function
+
+' ===============================================================================
+' Добавление события в очередь для асинхронной обработки
+' ===============================================================================
+Private Sub AddToQueue(ByVal topic As String, ByVal eventData As Variant)
+    ' Создаем структуру для хранения информации о событии
+    Dim eventInfo As New Dictionary
+    eventInfo.Add "topic", topic
+    eventInfo.Add "data", eventData
+    eventInfo.Add "time", Now
+    
+    ' Добавляем в очередь
+    m_EventQueue.Add eventInfo
+End Sub
+
+' ===============================================================================
+' Обработка очереди событий (вызывается периодически)
+' ===============================================================================
+Public Sub ProcessEventQueue()
+    ' Проверяем инициализацию
+    If Not m_Initialized Then Exit Sub
+    
+    ' Проверяем, не обрабатывается ли уже очередь
+    If m_IsProcessingQueue Then Exit Sub
+    
+    ' Устанавливаем флаг обработки
+    m_IsProcessingQueue = True
+    
+    ' Обрабатываем события в очереди
+    On Error Resume Next
+    
+    ' Обрабатываем до 10 событий за один вызов
+    Dim processCount As Long
+    processCount = 0
+    
+    While m_EventQueue.Count > 0 And processCount < 10
+        ' Получаем первое событие из очереди
+        Dim eventInfo As Dictionary
+        Set eventInfo = m_EventQueue(0)
+        m_EventQueue.RemoveAt 0
+        
+        ' Публикуем событие синхронно
+        Publish eventInfo("topic"), eventInfo("data"), False
+        
+        processCount = processCount + 1
+    Wend
+    
+    ' Сбрасываем флаг обработки
+    m_IsProcessingQueue = False
+    
+    ' Если в очереди остались события, планируем следующую обработку
+    If m_EventQueue.Count > 0 Then
+        Application.OnTime Now + TimeSerial(0, 0, 1), "ProcessEventQueue"
+    End If
+End Sub
+
+' ===============================================================================
+' Логирование ошибки рекурсии
+' ===============================================================================
+Private Sub LogRecursionError(ByVal topic As String)
+    ' Если есть Registry, используем его для логирования
+    If Not m_Registry Is Nothing Then
+        If HasMethod(m_Registry, "GetSetting") Then
+            Dim logLevel As Long
+            logLevel = m_Registry.GetSetting("LogLevel", 1)
+            
+            If logLevel >= 1 Then
+                Debug.Print "ERROR: Recursion limit exceeded for topic: " & topic
+            End If
+        End If
+    Else
+        Debug.Print "ERROR: Recursion limit exceeded for topic: " & topic
+    End If
+End Sub
+
+' ===============================================================================
+' Логирование ошибки при вызове обратного вызова
+' ===============================================================================
+Private Sub LogCallbackError(ByVal topic As String, ByVal component As Object, ByVal method As String, _
+                             ByVal errNumber As Long, ByVal errDescription As String)
+    ' Если есть Registry, используем его для логирования
+    If Not m_Registry Is Nothing Then
+        If HasMethod(m_Registry, "GetSetting") Then
+            Dim logLevel As Long
+            logLevel = m_Registry.GetSetting("LogLevel", 1)
+            
+            If logLevel >= 2 Then
+                Debug.Print "WARNING: Error in callback for topic: " & topic & ", Method: " & method & _
+                            ", Error: " & errNumber & " - " & errDescription
+            End If
+        End If
+    Else
+        Debug.Print "WARNING: Error in callback for topic: " & topic & ", Method: " & method & _
+                    ", Error: " & errNumber & " - " & errDescription
+    End If
+End Sub
+
+' ===============================================================================
+' Логирование ошибки при публикации события
+' ===============================================================================
+Private Sub LogPublishError(ByVal topic As String, ByVal errNumber As Long, ByVal errDescription As String)
+    ' Если есть Registry, используем его для логирования
+    If Not m_Registry Is Nothing Then
+        If HasMethod(m_Registry, "GetSetting") Then
+            Dim logLevel As Long
+            logLevel = m_Registry.GetSetting("LogLevel", 1)
+            
+            If logLevel >= 1 Then
+                Debug.Print "ERROR: Failed to publish event for topic: " & topic & _
+                            ", Error: " & errNumber & " - " & errDescription
+            End If
+        End If
+    Else
+        Debug.Print "ERROR: Failed to publish event for topic: " & topic & _
+                    ", Error: " & errNumber & " - " & errDescription
+    End If
+End Sub
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся получить тип объекта
+    Dim typeName As String
+    typeName = TypeName(obj)
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Активация компонента
+' ===============================================================================
+Public Sub Activate()
+    ' Этот метод вызывается Registry при активации компонента
+    ' Реализуем при необходимости
+End Sub
+
+' ===============================================================================
+' Деактивация компонента
+' ===============================================================================
+Public Sub Deactivate()
+    ' Этот метод вызывается Registry при деактивации компонента
+    ' Очищаем очередь событий
+    If Not m_EventQueue Is Nothing Then m_EventQueue.Clear
+    
+    m_IsProcessingQueue = False
+End Sub
+
+' ===============================================================================
+' Обработка изменения режима работы
+' ===============================================================================
+Public Sub OnModeChange(ByVal oldMode As Long, ByVal newMode As Long)
+    ' Этот метод вызывается Registry при изменении режима работы
+    ' Реализуем при необходимости
+End Sub
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    If Not m_Initialized Then Exit Sub
+    
+    ' Очищаем словарь подписчиков
+    Dim topic As Variant
+    For Each topic In m_Subscribers.Keys
+        m_Subscribers(topic).Clear
+    Next topic
+    m_Subscribers.RemoveAll
+    Set m_Subscribers = Nothing
+    
+    ' Очищаем очередь событий
+    If Not m_EventQueue Is Nothing Then m_EventQueue.Clear
+    Set m_EventQueue = Nothing
+    
+    ' Очищаем ссылку на Registry
+    Set m_Registry = Nothing
+    
+    m_IsProcessingQueue = False
+    m_Initialized = False
+End Sub

@@ -1,0 +1,241 @@
+' ===============================================================================
+' BaseCommand - абстрактный базовый класс для всех команд
+' -------------------------------------------------------------------------------
+' Предоставляет базовую реализацию интерфейса ICommand, которую 
+' можно наследовать в конкретных командах.
+' ===============================================================================
+Option Explicit
+
+' Implements ICommand - VBA не имеет прямой поддержки интерфейсов,
+' но мы имитируем этот механизм через полную реализацию всех методов
+
+' Данные команды
+Private m_name As String             ' Имя команды
+Private m_description As String      ' Описание команды
+Private m_result As Object           ' Dictionary с результатами выполнения
+Private m_errorCode As Long          ' Код ошибки (0 = нет ошибки)
+Private m_errorMessage As String     ' Сообщение об ошибке
+Private m_registry As Object         ' Ссылка на Registry
+Private m_eventBus As Object         ' Ссылка на EventBus
+Private m_initialized As Boolean     ' Флаг инициализации
+
+' ===============================================================================
+' Инициализация команды
+' ===============================================================================
+Public Sub Initialize(ByVal name As String, _
+                      ByVal description As String, _
+                      Optional ByVal registry As Object = Nothing, _
+                      Optional ByVal eventBus As Object = Nothing)
+    
+    ' Устанавливаем базовые свойства
+    m_name = name
+    m_description = description
+    
+    ' Сохраняем ссылки на сервисы
+    Set m_registry = registry
+    Set m_eventBus = eventBus
+    
+    ' Создаем объект для результатов
+    Set m_result = CreateObject("Scripting.Dictionary")
+    
+    ' Сбрасываем информацию об ошибках
+    ResetError
+    
+    m_initialized = True
+End Sub
+
+' ===============================================================================
+' Метод выполнения команды (должен быть переопределен)
+' ===============================================================================
+Public Function Execute() As Boolean
+    ' Базовая реализация - просто проверяем инициализацию
+    If Not m_initialized Then
+        SetError 1, "Command not initialized"
+        Execute = False
+        Exit Function
+    End If
+    
+    ' Проверяем возможность выполнения
+    If Not CanExecute() Then
+        Execute = False
+        Exit Function
+    End If
+    
+    ' Публикуем событие начала выполнения
+    PublishEvent "Command.Executing", Me
+    
+    ' В производных классах здесь должна быть реализация выполнения
+    
+    ' Публикуем событие успешного выполнения
+    PublishEvent "Command.Executed", Me
+    
+    Execute = True
+End Function
+
+' ===============================================================================
+' Метод отмены выполнения команды (должен быть переопределен)
+' ===============================================================================
+Public Function Undo() As Boolean
+    ' Базовая реализация - проверяем инициализацию
+    If Not m_initialized Then
+        SetError 1, "Command not initialized"
+        Undo = False
+        Exit Function
+    End If
+    
+    ' Публикуем событие начала отмены
+    PublishEvent "Command.Undoing", Me
+    
+    ' В производных классах здесь должна быть реализация отмены
+    
+    ' Публикуем событие успешной отмены
+    PublishEvent "Command.Undone", Me
+    
+    Undo = True
+End Function
+
+' ===============================================================================
+' Проверка возможности выполнения команды (должна быть переопределена)
+' ===============================================================================
+Public Function CanExecute() As Boolean
+    ' Базовая реализация - проверяем только инициализацию
+    CanExecute = m_initialized
+End Function
+
+' ===============================================================================
+' Получение имени команды
+' ===============================================================================
+Public Property Get Name() As String
+    Name = m_name
+End Property
+
+' ===============================================================================
+' Получение описания команды
+' ===============================================================================
+Public Property Get Description() As String
+    Description = m_description
+End Property
+
+' ===============================================================================
+' Получение результата выполнения
+' ===============================================================================
+Public Property Get Result() As Object ' Dictionary
+    Set Result = m_result
+End Property
+
+' ===============================================================================
+' Получение кода ошибки
+' ===============================================================================
+Public Property Get ErrorCode() As Long
+    ErrorCode = m_errorCode
+End Property
+
+' ===============================================================================
+' Получение сообщения об ошибке
+' ===============================================================================
+Public Property Get ErrorMessage() As String
+    ErrorMessage = m_errorMessage
+End Property
+
+' ===============================================================================
+' Установка информации об ошибке
+' ===============================================================================
+Protected Sub SetError(ByVal errorCode As Long, ByVal errorMessage As String)
+    m_errorCode = errorCode
+    m_errorMessage = errorMessage
+    
+    ' Добавляем информацию об ошибке в результат
+    If Not m_result Is Nothing Then
+        m_result("ErrorCode") = errorCode
+        m_result("ErrorMessage") = errorMessage
+    End If
+    
+    ' Публикуем событие об ошибке
+    If errorCode <> 0 Then
+        PublishEvent "Command.Error", Me
+    End If
+End Sub
+
+' ===============================================================================
+' Сброс информации об ошибке
+' ===============================================================================
+Protected Sub ResetError()
+    m_errorCode = 0
+    m_errorMessage = ""
+    
+    ' Удаляем информацию об ошибке из результата
+    If Not m_result Is Nothing Then
+        If m_result.Exists("ErrorCode") Then m_result.Remove "ErrorCode"
+        If m_result.Exists("ErrorMessage") Then m_result.Remove "ErrorMessage"
+    End If
+End Sub
+
+' ===============================================================================
+' Добавление данных в результат
+' ===============================================================================
+Protected Sub AddResult(ByVal key As String, ByVal value As Variant)
+    If m_result Is Nothing Then Exit Sub
+    
+    ' Если ключ уже существует, обновляем значение
+    If m_result.Exists(key) Then
+        m_result(key) = value
+    Else
+        ' Иначе добавляем новый ключ-значение
+        m_result.Add key, value
+    End If
+End Sub
+
+' ===============================================================================
+' Публикация события через EventBus
+' ===============================================================================
+Protected Sub PublishEvent(ByVal topic As String, ByVal command As Object)
+    ' Проверяем наличие EventBus
+    If m_eventBus Is Nothing Then Exit Sub
+    
+    ' Проверяем, что EventBus имеет метод Publish
+    If Not HasMethod(m_eventBus, "Publish") Then Exit Sub
+    
+    ' Публикуем событие
+    m_eventBus.Publish topic, command
+End Sub
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Получение компонента из Registry
+' ===============================================================================
+Protected Function GetComponent(ByVal componentName As String) As Object
+    ' Проверяем наличие Registry
+    If m_registry Is Nothing Then Exit Function
+    
+    ' Проверяем, что Registry имеет метод GetComponent
+    If Not HasMethod(m_registry, "GetComponent") Then Exit Function
+    
+    ' Получаем компонент
+    Set GetComponent = m_registry.GetComponent(componentName)
+End Function
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    ' Освобождаем ссылки
+    Set m_result = Nothing
+    Set m_registry = Nothing
+    Set m_eventBus = Nothing
+    
+    m_initialized = False
+End Sub

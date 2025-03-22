@@ -1,0 +1,360 @@
+' ===============================================================================
+' Registry - центральный реестр компонентов системы
+' -------------------------------------------------------------------------------
+' Модуль предоставляет централизованное хранилище для компонентов системы,
+' настроек и состояний.
+' ===============================================================================
+Option Explicit
+
+' Константы для режимов работы
+Public Enum DebugMode
+    dmPassive = 0    ' Пассивный режим (только базовое логирование)
+    dmActive = 1     ' Активный мониторинг (базовая инструментация)
+    dmDiagnostic = 2 ' Диагностический режим (полная инструментация)
+    dmDebug = 3      ' Режим отладки (максимальная детализация)
+End Enum
+
+' Типы компонентов системы
+Public Enum ComponentType
+    ctCore = 0       ' Ядро системы
+    ctDiagnostic = 1 ' Диагностический компонент
+    ctAnalytic = 2   ' Аналитический компонент
+    ctErrorMgmt = 3  ' Компонент управления ошибками
+    ctInterface = 4  ' Интерфейсный компонент
+    ctExtension = 5  ' Расширение/плагин
+End Enum
+
+' Текущий режим работы
+Private m_CurrentMode As DebugMode
+
+' Словарь зарегистрированных компонентов
+Private m_Components As Object ' Dictionary (компонент => информация)
+
+' Словарь настроек
+Private m_Settings As Object ' Dictionary (ключ => значение)
+
+' Флаг инициализации
+Private m_Initialized As Boolean
+
+' ===============================================================================
+' Инициализация реестра
+' ===============================================================================
+Public Sub Initialize()
+    If m_Initialized Then Exit Sub
+    
+    ' Создаем словари
+    Set m_Components = CreateObject("Scripting.Dictionary")
+    Set m_Settings = CreateObject("Scripting.Dictionary")
+    
+    ' Устанавливаем режим по умолчанию
+    m_CurrentMode = dmPassive
+    
+    ' Загружаем настройки по умолчанию
+    LoadDefaultSettings
+    
+    m_Initialized = True
+End Sub
+
+' ===============================================================================
+' Получение текущего режима работы
+' ===============================================================================
+Public Property Get CurrentMode() As DebugMode
+    CurrentMode = m_CurrentMode
+End Property
+
+' ===============================================================================
+' Установка режима работы
+' ===============================================================================
+Public Property Let CurrentMode(ByVal newMode As DebugMode)
+    ' Проверяем, изменился ли режим
+    If m_CurrentMode = newMode Then Exit Property
+    
+    ' Запоминаем старый режим для уведомления
+    Dim oldMode As DebugMode
+    oldMode = m_CurrentMode
+    
+    ' Устанавливаем новый режим
+    m_CurrentMode = newMode
+    
+    ' Уведомляем компоненты об изменении режима
+    NotifyModeChange oldMode, newMode
+End Property
+
+' ===============================================================================
+' Регистрация компонента в системе
+' ===============================================================================
+Public Function RegisterComponent(ByVal component As Object, _
+                                 ByVal componentName As String, _
+                                 ByVal componentType As ComponentType, _
+                                 Optional ByVal autoInitialize As Boolean = True) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверяем инициализацию
+    If Not m_Initialized Then Initialize
+    
+    ' Проверяем, не зарегистрирован ли уже компонент
+    If m_Components.Exists(component) Then
+        RegisterComponent = True
+        Exit Function
+    End If
+    
+    ' Создаем информацию о компоненте
+    Dim info As New Dictionary
+    info.Add "name", componentName
+    info.Add "type", componentType
+    info.Add "initialized", False
+    info.Add "active", False
+    
+    ' Добавляем компонент в реестр
+    m_Components.Add component, info
+    
+    ' Инициализируем компонент, если требуется
+    If autoInitialize Then
+        ' Проверяем наличие метода Initialize
+        If HasMethod(component, "Initialize") Then
+            component.Initialize
+            m_Components(component)("initialized") = True
+        End If
+        
+        ' Активируем компонент, если его тип соответствует текущему режиму
+        Select Case componentType
+            Case ctCore
+                ' Компоненты ядра всегда активны
+                ActivateComponent component
+            Case ctDiagnostic
+                ' Диагностические компоненты активны в режимах выше пассивного
+                If m_CurrentMode >= dmActive Then ActivateComponent component
+            Case ctAnalytic
+                ' Аналитические компоненты активны в диагностическом режиме и выше
+                If m_CurrentMode >= dmDiagnostic Then ActivateComponent component
+            Case ctErrorMgmt
+                ' Компоненты управления ошибками всегда активны
+                ActivateComponent component
+            Case ctInterface
+                ' Интерфейсные компоненты активируются в зависимости от настроек
+                If GetSetting("EnableInterface", True) Then ActivateComponent component
+            Case ctExtension
+                ' Расширения активируются, если они включены в настройках
+                If GetSetting("EnableExtensions", True) Then
+                    If GetSetting("Extension_" & componentName, False) Then
+                        ActivateComponent component
+                    End If
+                End If
+        End Select
+    End If
+    
+    RegisterComponent = True
+    Exit Function
+    
+ErrorHandler:
+    RegisterComponent = False
+End Function
+
+' ===============================================================================
+' Активация компонента
+' ===============================================================================
+Public Function ActivateComponent(ByVal component As Object) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверяем, зарегистрирован ли компонент
+    If Not m_Components.Exists(component) Then
+        ActivateComponent = False
+        Exit Function
+    End If
+    
+    ' Проверяем, не активен ли он уже
+    If m_Components(component)("active") = True Then
+        ActivateComponent = True
+        Exit Function
+    End If
+    
+    ' Проверяем инициализацию
+    If Not m_Components(component)("initialized") Then
+        ' Проверяем наличие метода Initialize
+        If HasMethod(component, "Initialize") Then
+            component.Initialize
+            m_Components(component)("initialized") = True
+        End If
+    End If
+    
+    ' Проверяем наличие метода Activate
+    If HasMethod(component, "Activate") Then
+        component.Activate
+    End If
+    
+    ' Отмечаем компонент как активный
+    m_Components(component)("active") = True
+    
+    ActivateComponent = True
+    Exit Function
+    
+ErrorHandler:
+    ActivateComponent = False
+End Function
+
+' ===============================================================================
+' Деактивация компонента
+' ===============================================================================
+Public Function DeactivateComponent(ByVal component As Object) As Boolean
+    On Error GoTo ErrorHandler
+    
+    ' Проверяем, зарегистрирован ли компонент
+    If Not m_Components.Exists(component) Then
+        DeactivateComponent = False
+        Exit Function
+    End If
+    
+    ' Проверяем, активен ли он
+    If m_Components(component)("active") = False Then
+        DeactivateComponent = True
+        Exit Function
+    End If
+    
+    ' Проверяем наличие метода Deactivate
+    If HasMethod(component, "Deactivate") Then
+        component.Deactivate
+    End If
+    
+    ' Отмечаем компонент как неактивный
+    m_Components(component)("active") = False
+    
+    DeactivateComponent = True
+    Exit Function
+    
+ErrorHandler:
+    DeactivateComponent = False
+End Function
+
+' ===============================================================================
+' Получение значения настройки
+' ===============================================================================
+Public Function GetSetting(ByVal settingName As String, Optional ByVal defaultValue As Variant) As Variant
+    ' Проверяем инициализацию
+    If Not m_Initialized Then Initialize
+    
+    ' Проверяем, существует ли настройка
+    If m_Settings.Exists(settingName) Then
+        GetSetting = m_Settings(settingName)
+    Else
+        ' Если настройки нет, возвращаем значение по умолчанию
+        GetSetting = defaultValue
+        ' И добавляем настройку с этим значением
+        m_Settings.Add settingName, defaultValue
+    End If
+End Function
+
+' ===============================================================================
+' Установка значения настройки
+' ===============================================================================
+Public Sub SetSetting(ByVal settingName As String, ByVal value As Variant)
+    ' Проверяем инициализацию
+    If Not m_Initialized Then Initialize
+    
+    ' Проверяем, существует ли настройка
+    If m_Settings.Exists(settingName) Then
+        m_Settings(settingName) = value
+    Else
+        m_Settings.Add settingName, value
+    End If
+End Sub
+
+' ===============================================================================
+' Загрузка настроек по умолчанию
+' ===============================================================================
+Private Sub LoadDefaultSettings()
+    ' Основные настройки
+    m_Settings.Add "EnableInterface", True
+    m_Settings.Add "EnableExtensions", True
+    m_Settings.Add "LogLevel", 1 ' 0 - Critical, 1 - Error, 2 - Warning, 3 - Info, 4 - Debug, 5 - Trace
+    m_Settings.Add "LogToFile", True
+    m_Settings.Add "LogFilePath", "ErrorLog.txt"
+    
+    ' Настройки диагностики
+    m_Settings.Add "TrackVariables", True
+    m_Settings.Add "TrackCallStack", True
+    m_Settings.Add "TrackMemoryUsage", False
+    
+    ' Настройки анализа
+    m_Settings.Add "EnableAIAnalysis", False
+    m_Settings.Add "AIApiKey", ""
+    m_Settings.Add "EnableVisualization", True
+    
+    ' Настройки обработки ошибок
+    m_Settings.Add "AutoRecovery", True
+    m_Settings.Add "CreateErrorPassports", True
+    m_Settings.Add "ErrorHistorySize", 100
+End Sub
+
+' ===============================================================================
+' Уведомление компонентов об изменении режима
+' ===============================================================================
+Private Sub NotifyModeChange(ByVal oldMode As DebugMode, ByVal newMode As DebugMode)
+    ' Получаем все компоненты
+    Dim component As Variant
+    For Each component In m_Components.Keys
+        ' Проверяем наличие метода OnModeChange
+        If HasMethod(component, "OnModeChange") Then
+            ' Уведомляем компонент об изменении режима
+            component.OnModeChange oldMode, newMode
+        End If
+        
+        ' Управляем активацией компонентов в зависимости от режима
+        Dim componentType As ComponentType
+        componentType = m_Components(component)("type")
+        
+        Select Case componentType
+            Case ctDiagnostic
+                ' Диагностические компоненты активны в режимах выше пассивного
+                If newMode >= dmActive And oldMode < dmActive Then
+                    ActivateComponent component
+                ElseIf newMode < dmActive And oldMode >= dmActive Then
+                    DeactivateComponent component
+                End If
+            Case ctAnalytic
+                ' Аналитические компоненты активны в диагностическом режиме и выше
+                If newMode >= dmDiagnostic And oldMode < dmDiagnostic Then
+                    ActivateComponent component
+                ElseIf newMode < dmDiagnostic And oldMode >= dmDiagnostic Then
+                    DeactivateComponent component
+                End If
+        End Select
+    Next component
+End Sub
+
+' ===============================================================================
+' Проверка наличия метода у объекта
+' ===============================================================================
+Private Function HasMethod(ByVal obj As Object, ByVal methodName As String) As Boolean
+    On Error Resume Next
+    
+    ' Пытаемся получить тип объекта
+    Dim typeName As String
+    typeName = TypeName(obj)
+    
+    ' Пытаемся вызвать метод
+    CallByName obj, methodName, VbMethod
+    
+    ' Проверяем наличие ошибки
+    HasMethod = (Err.Number = 0)
+    
+    On Error GoTo 0
+End Function
+
+' ===============================================================================
+' Освобождение ресурсов
+' ===============================================================================
+Public Sub Terminate()
+    If Not m_Initialized Then Exit Sub
+    
+    ' Деактивируем все компоненты
+    Dim component As Variant
+    For Each component In m_Components.Keys
+        DeactivateComponent component
+    Next component
+    
+    ' Очищаем словари
+    Set m_Components = Nothing
+    Set m_Settings = Nothing
+    
+    m_Initialized = False
+End Sub
